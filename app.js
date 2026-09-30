@@ -386,6 +386,7 @@ function renderBookings() {
     : `<div class="empty">No classes booked yet.<br><button class="btn" style="margin-top:12px" data-goexplore>Find a class</button></div>`;
 }
 function renderPlans() {
+  const cur = p => profile && profile.plan === p.id && profile.plan_started_at && Date.now() - new Date(profile.plan_started_at) < 30 * 864e5;
   $('#planList').innerHTML = PLANS.map(p => `
     <div class="plan ${p.pop ? 'pop' : ''}">
       ${p.pop ? '<div class="badge">Most popular</div>' : ''}
@@ -393,8 +394,7 @@ function renderPlans() {
       <div class="price">$${p.price}<small>/month</small></div>
       <div class="meta">⭐ ${p.credits} credits every month</div>
       <ul>${p.perks.map(x => `<li>${x}</li>`).join('')}</ul>
-      <button class="btn ${profile && profile.plan === p.id ? 'ghost' : ''}" data-plan="${p.id}">
-        ${profile && profile.plan === p.id ? 'Current plan · add credits' : 'Choose ' + p.name}</button>
+      ${cur(p) ? `<button class="btn ghost" disabled>✓ Current plan</button>` : `<button class="btn" data-plan="${p.id}">Choose ${p.name}</button>`}
     </div>`).join('');
 }
 function renderProfile() {
@@ -560,9 +560,9 @@ async function handleClick(e) {
   if ((el = hit('[data-plan]'))) {
     if (!user) return openAuth('login', 'Log in or sign up to choose a plan.');
     const p = PLANS.find(x => x.id === el.dataset.plan);
-    const { error } = await sb.rpc('demo_choose_plan', { p_plan: p.id, p_credits: p.credits });
+    const { error } = await sb.rpc('demo_choose_plan', { p_plan: p.id });
     if (error) return toast(error.message);
-    await refresh(); toast(`Welcome to ${p.name}! +${p.credits} credits (demo, no charge)`);
+    await refresh(); toast(`You're on the ${p.name} plan! (demo, no charge)`);
   }
 }
 document.body.addEventListener('click', handleClick);

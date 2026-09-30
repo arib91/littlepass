@@ -9,6 +9,7 @@ create table public.profiles (
   display_name text,
   credits int not null default 10 check (credits >= 0),
   plan text,
+  plan_started_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -112,14 +113,30 @@ begin
   update public.profiles set credits = credits + b.credits where id = auth.uid();
 end $$;
 
--- Demo only: adds plan credits without payment. Replace with Stripe before launch.
-create function public.demo_choose_plan(p_plan text, p_credits int) returns void
+-- Demo only (no payment yet): grants a plan's credits once per 30 days.
+-- Upgrading mid-month grants only the difference. Replace with Stripe before launch.
+create function public.demo_choose_plan(p_plan text) returns void
 language plpgsql security definer set search_path = public as $$
+declare new_c int; old_c int; p public.profiles;
 begin
   if auth.uid() is null then raise exception 'Please log in'; end if;
-  if p_credits not in (12, 25, 45) then raise exception 'Invalid plan'; end if;
-  update public.profiles set plan = p_plan, credits = credits + p_credits where id = auth.uid();
+  new_c := case p_plan when 'sprout' then 12 when 'bloom' then 25 when 'grove' then 45 end;
+  if new_c is null then raise exception 'Invalid plan'; end if;
+  select * into p from public.profiles where id = auth.uid();
+  if p.role <> 'parent' then raise exception 'Only parent accounts can choose a plan'; end if;
+  if p.plan = p_plan and p.plan_started_at > now() - interval '30 days' then
+    raise exception 'You are already on the % plan. Credits renew monthly.', p_plan;
+  end if;
+  old_c := case when p.plan_started_at > now() - interval '30 days'
+    then case p.plan when 'sprout' then 12 when 'bloom' then 25 when 'grove' then 45 else 0 end
+    else 0 end;
+  update public.profiles set
+    plan = p_plan,
+    plan_started_at = case when old_c > 0 then plan_started_at else now() end,
+    credits = credits + greatest(new_c - old_c, 0)
+  where id = auth.uid();
 end $$;
+
 
 -- How many spots are taken per class and date (everyone may see counts, not who)
 create function public.booked_counts(p_from date, p_to date)
@@ -175,7 +192,7 @@ create policy "delete own review" on public.reviews for delete using (user_id = 
 
 grant execute on function public.book_class(uuid, date) to authenticated;
 grant execute on function public.cancel_booking(uuid) to authenticated;
-grant execute on function public.demo_choose_plan(text, int) to authenticated;
+grant execute on function public.demo_choose_plan(text) to authenticated;
 grant execute on function public.booked_counts(date, date) to anon, authenticated;
 
 -- ============ SAMPLE PARTNERS (fictional) ============
