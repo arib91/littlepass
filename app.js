@@ -215,9 +215,30 @@ function openAuth(mode = 'login', reason = '', role = authState.role) {
       <div class="label">Your name</div><input id="auName" placeholder="Your name" autocomplete="name">` : ''}
     <div class="label">Email</div><input id="auEmail" type="email" placeholder="you@email.com" autocomplete="email">
     <div class="label">Password</div><input id="auPass" type="password" placeholder="At least 6 characters" autocomplete="${su ? 'new-password' : 'current-password'}">
+    ${su ? '' : '<div style="margin:-4px 0 8px"><a class="lnk" data-forgot style="font-size:14px;font-weight:700">Forgot password?</a></div>'}
     <div class="err" id="auErr"></div>
     <div class="actions"><button class="btn ghost" data-close>Cancel</button><button class="btn" data-authgo>${su ? 'Create account' : 'Log in'}</button></div>`);
   setTimeout(() => { const f = $('#auName') || $('#auEmail'); if (f) f.focus(); }, 50);
+}
+async function forgotPassword() {
+  const email = $('#auEmail').value.trim(), err = $('#auErr');
+  if (!email) { err.textContent = 'Type your email above first, then click "Forgot password?"'; return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+  if (error) { err.textContent = error.message; return; }
+  openModal('<h2>Check your email 📬</h2><p>If there is an account for <b>' + esc(email) + '</b>, we sent a link to choose a new password. It can take a minute, and check your spam folder.</p><div class="actions"><button class="btn" data-close>OK</button></div>');
+}
+function openNewPassword() {
+  openModal(`<h2>Choose a new password</h2>
+    <div class="label">New password</div><input id="npPass" type="password" placeholder="At least 6 characters" autocomplete="new-password">
+    <div class="err" id="npErr"></div>
+    <div class="actions"><button class="btn ghost" data-close>Cancel</button><button class="btn" data-setpass>Save password</button></div>`);
+}
+async function setNewPassword() {
+  const pw = $('#npPass').value;
+  if (pw.length < 6) { $('#npErr').textContent = 'Use at least 6 characters.'; return; }
+  const { error } = await sb.auth.updateUser({ password: pw });
+  if (error) { $('#npErr').textContent = error.message; return; }
+  closeModal(); toast('Password updated. You\'re logged in ✓');
 }
 async function authGo() {
   const email = $('#auEmail').value.trim(), password = $('#auPass').value, err = $('#auErr');
@@ -751,6 +772,8 @@ async function handleClick(e) {
   if ((el = hit('[data-authmode]'))) { openAuth(el.dataset.authmode, authState.reason); return; }
   if ((el = hit('[data-authrole]'))) { openAuth('signup', authState.reason, el.dataset.authrole); return; }
   if (hit('[data-authgo]')) { authGo(); return; }
+  if (hit('[data-forgot]')) { forgotPassword(); return; }
+  if (hit('[data-setpass]')) { setNewPassword(); return; }
   if (hit('[data-createstudio]')) { createStudio(); return; }
   if (hit('[data-createclass]')) { createClass(); return; }
   if (hit('[data-savestudio]')) { saveStudio(); return; }
@@ -848,6 +871,7 @@ renderAll();
   loaded = true; buildSessions(); renderAll();
   // Fires once right away with the saved session, then on every login/logout
   sb.auth.onAuthStateChange((event, session) => {
+    if (event === 'PASSWORD_RECOVERY') setTimeout(openNewPassword, 0);
     user = session ? session.user : null;
     const uid = user ? user.id : null;
     if (uid === lastUid && event !== 'INITIAL_SESSION') return; // ignore token refreshes
