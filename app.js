@@ -48,17 +48,19 @@ const REVIEW_POOL = [
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // ---------- State ----------
-let user = null, profile = null, kids = [], myBookings = [], ownerBookings = 0;
-let studios = [], classes = [], counts = {}, reviews = [], loaded = false;
+let user = null, profile = null, kids = [], myBookings = [], studioBookings = [], payouts = [];
+let studios = [], classes = [], slots = [], counts = {}, reviews = [], loaded = false;
 let filters = { age: 'all', cat: 'all', hood: HOODS[0], day: 'all' };
-let exploreMode = 'list', lastTab = 'explore', currentStudio = null;
+let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentStudio = null;
 let authState = { mode: 'login', role: 'parent', reason: '' };
+let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 
 // ---------- Helpers ----------
 const $ = s => document.querySelector(s);
 const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const today = new Date(); today.setHours(0, 0, 0, 0);
+const todayStr = fmt(today);
 const DAYS = Array.from({ length: 7 }, (_, i) => { const d = new Date(today); d.setDate(d.getDate() + i); return d; });
 const dayName = d => {
   const diff = Math.round((d - today) / 864e5);
@@ -66,6 +68,7 @@ const dayName = d => {
   if (diff === 1) return 'Tomorrow';
   return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 };
+const dateLabel = str => new Date(str + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 const ageText = (min, max) => {
   const f = m => m < 12 ? `${m} mo` : `${Math.round(m / 12 * 10) / 10} yr`;
   return `${f(min)} – ${f(max)}`;
@@ -75,7 +78,11 @@ const monthsOld = bday => {
   return (n.getFullYear() - b.getFullYear()) * 12 + (n.getMonth() - b.getMonth()) - (n.getDate() < b.getDate() ? 1 : 0);
 };
 const to12 = t => { let [h, m] = t.split(':').map(Number); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return `${h}:${String(m).padStart(2, '0')} ${ap}`; };
+const t12 = t => to12(String(t).slice(0, 5));
 const timeVal = t => new Date('1/1/2000 ' + t);
+const money = c => '$' + (c / 100).toFixed(2);
+const sum = (arr, f) => arr.reduce((a, x) => a + f(x), 0);
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, Number.isFinite(v) ? v : lo));
 function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2600);
@@ -86,31 +93,41 @@ $('#modalBg').onclick = e => { if (e.target.id === 'modalBg' || e.target.dataset
 
 // ---------- Data ----------
 async function loadPublic() {
-  const [st, cl, rv, ct] = await Promise.all([
+  const [st, cl, sl, rv, ct] = await Promise.all([
     sb.from('studios').select('*'),
     sb.from('classes').select('*'),
+    sb.from('class_slots').select('*'),
     sb.from('reviews').select('*').order('created_at'),
     sb.rpc('booked_counts', { p_from: fmt(DAYS[0]), p_to: fmt(DAYS[6]) }),
   ]);
-  if (st.error || cl.error) throw (st.error || cl.error);
-  studios = st.data; classes = cl.data; reviews = rv.data || [];
+  if (st.error || cl.error || sl.error) throw (st.error || cl.error || sl.error);
+  studios = st.data; classes = cl.data; slots = sl.data; reviews = rv.data || [];
   counts = {};
-  (ct.data || []).forEach(r => { counts[`${r.class_id}_${r.session_date}`] = Number(r.taken); });
+  (ct.data || []).forEach(r => { counts[`${r.slot_id}_${r.session_date}`] = Number(r.taken); });
 }
 async function loadPrivate() {
-  if (!user) { profile = null; kids = []; myBookings = []; ownerBookings = 0; return; }
-  const [p, k, b] = await Promise.all([
-    sb.from('profiles').select('*').eq('id', user.id).single(),
-    sb.from('kids').select('*').order('created_at'),
-    sb.from('bookings').select('*').gte('session_date', fmt(DAYS[0])),
-  ]);
-  profile = p.data; kids = k.data || [];
-  const all = b.data || [];
-  myBookings = all.filter(x => x.user_id === user.id);
-  ownerBookings = all.filter(x => x.user_id !== user.id).length; // RLS: only rows for this studio's classes
+  kids = []; myBookings = []; studioBookings = []; payouts = [];
+  if (!user) { profile = null; return; }
+  profile = (await sb.from('profiles').select('*').eq('id', user.id).single()).data;
+  if (profile && profile.role === 'studio') {
+    const st = studios.find(s => s.owner_id === user.id);
+    if (st) {
+      const [b, po] = await Promise.all([
+        sb.from('bookings').select('*').eq('studio_id', st.id).order('session_date', { ascending: false }).limit(1000),
+        sb.from('payouts').select('*').eq('studio_id', st.id).order('created_at', { ascending: false }),
+      ]);
+      studioBookings = b.data || []; payouts = po.data || [];
+    }
+  } else {
+    const [k, b] = await Promise.all([
+      sb.from('kids').select('*').order('created_at'),
+      sb.from('bookings').select('*').eq('user_id', user.id).gte('session_date', todayStr),
+    ]);
+    kids = k.data || []; myBookings = b.data || [];
+  }
 }
 async function refresh() {
-  await Promise.all([loadPublic(), loadPrivate()]);
+  await loadPublic(); await loadPrivate();
   buildSessions(); renderAll();
 }
 
@@ -118,43 +135,67 @@ async function refresh() {
 const SESSIONS = [], PARTNERS = [];
 const studioById = id => studios.find(s => s.id === id);
 const studioByName = n => studios.find(s => s.name === n);
-const allTemplates = () => classes.map(c => {
-  const st = studioById(c.studio_id);
-  return { key: c.id, capacity: c.capacity, studio: st,
-    custom: !!user && st.owner_id === user.id,
-    t: [c.title, st.name, c.cat, c.hood, c.age_min, c.age_max, c.credits, c.days, c.start_time, c.mins] };
-});
+const myStudio = () => user ? studios.find(s => s.owner_id === user.id) : null;
 function buildSessions() {
   SESSIONS.length = 0; PARTNERS.length = 0;
-  allTemplates().forEach(({ key, t, capacity }) => {
-    const [title, studio, cat, hood, ageMin, ageMax, credits, days, time, mins] = t;
+  const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
+  slots.filter(sl => sl.active).forEach(sl => {
+    const c = classes.find(x => x.id === sl.class_id), st = c && studioById(c.studio_id);
+    if (!st) return;
+    const [h, m] = String(sl.start_time).split(':').map(Number);
+    let any = false;
     DAYS.forEach(d => {
-      if (!days.includes(d.getDay())) return;
-      const dateStr = fmt(d), id = `${key}_${dateStr}`;
-      SESSIONS.push({ id, key, dateStr, title, studio, cat, hood, ageMin, ageMax, credits, date: d, time, mins,
-        spots: capacity - (counts[id] || 0) });
+      if (d.getDay() !== sl.dow) return;
+      if (d.getTime() === today.getTime() && h * 60 + m <= nowMin) return; // already started
+      const dateStr = fmt(d), id = `${sl.id}_${dateStr}`, taken = counts[id] || 0;
+      SESSIONS.push({ id, key: sl.id, classId: c.id, studioId: st.id, dateStr, title: c.title, studio: st.name, cat: c.cat, hood: c.hood,
+        ageMin: c.age_min, ageMax: c.age_max, credits: sl.credits, priceCents: sl.price_cents, date: d,
+        time: t12(sl.start_time), mins: sl.mins, capacity: sl.capacity, taken, spots: sl.capacity - taken });
+      any = true;
     });
-    let p = PARTNERS.find(x => x.studio === studio && x.hood === hood);
-    if (!p && COORDS[hood]) {
-      const n = PARTNERS.filter(x => x.hood === hood).length, base = COORDS[hood];
-      p = { studio, hood, pos: [base[0] + n * 0.006, base[1] + n * 0.008] };
-      PARTNERS.push(p);
+    if (any && COORDS[c.hood] && !PARTNERS.find(x => x.studio === st.name && x.hood === c.hood)) {
+      const n = PARTNERS.filter(x => x.hood === c.hood).length, base = COORDS[c.hood];
+      PARTNERS.push({ studio: st.name, hood: c.hood, pos: [base[0] + n * 0.006, base[1] + n * 0.008] });
     }
   });
 }
-const bookingFor = id => myBookings.find(b => `${b.class_id}_${b.session_date}` === id);
+const bookingFor = id => myBookings.find(b => `${b.slot_id}_${b.session_date}` === id);
 const isBooked = id => !!bookingFor(id);
+// A booked class, even if the studio has since changed or paused the slot
+function sessionFromBooking(b) {
+  const live = SESSIONS.find(s => s.id === `${b.slot_id}_${b.session_date}`);
+  if (live) return live;
+  const c = classes.find(x => x.id === b.class_id), st = studioById(b.studio_id);
+  return { id: `${b.slot_id}_${b.session_date}`, key: b.slot_id, title: b.class_title, studio: st ? st.name : 'Studio',
+    cat: c ? c.cat : 'all', hood: c ? c.hood : 'San Diego', ageMin: 0, ageMax: 0, credits: b.credits,
+    date: new Date(b.session_date + 'T00:00:00'), time: t12(b.session_time), mins: 0, spots: 1 };
+}
 
-// ---------- Header ----------
+// ---------- Header + navigation ----------
+const isStudioUser = () => !!(user && profile && profile.role === 'studio');
+function renderNav() {
+  const items = isStudioUser()
+    ? [['o-overview', '📊', 'Overview'], ['o-classes', '📚', 'Classes'], ['o-bookings', '📅', 'Bookings'], ['o-earnings', '💰', 'Earnings'], ['o-account', '⚙️', 'Account']]
+    : [['explore', '🔍', 'Explore'], ['bookings', '📅', 'My classes'], ['plans', '⭐', 'Plans'], ['profile', '👶', 'Family']];
+  const nav = document.querySelector('nav.tabs');
+  nav.innerHTML = items.map(([id, ico, label]) => `<button data-tab="${id}"><span class="ico">${ico}</span>${label}</button>`).join('');
+  markNav();
+}
+function markNav() {
+  const key = currentView === 'owner' ? 'o-' + ownerTab : currentView;
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === key));
+}
 function renderHeader() {
   const b = $('#creditBtn');
+  $('#ownerBtn').classList.toggle('hidden', !!user);
   if (!user) b.textContent = 'Log in';
-  else if (profile && profile.role === 'studio') b.textContent = '🏢 Studio';
+  else if (isStudioUser()) { const st = myStudio(); b.textContent = '🏢 ' + (st ? st.name.slice(0, 18) : 'Studio'); }
   else b.textContent = `⭐ ${profile ? profile.credits : 0} credits`;
+  renderNav();
 }
 $('#creditBtn').onclick = () => {
   if (!user) return openAuth('login');
-  showTab(profile && profile.role === 'studio' ? 'owner' : 'plans');
+  showTab(isStudioUser() ? 'o-account' : 'plans');
 };
 $('#ownerBtn').onclick = () => showTab('owner');
 
@@ -241,7 +282,7 @@ function card(s, mode) {
       <h3>${esc(s.title)}</h3>
       <div class="meta"><a class="lnk" data-studio="${esc(s.studio)}">${esc(s.studio)}</a><br>📍 ${s.hood} · 🕘 ${mode === 'booking' ? dayName(s.date) + ', ' : ''}${s.time} (${s.mins} min)</div>
       <div class="tags">
-        <span class="tag">👶 ${ageText(s.ageMin, s.ageMax)}</span>
+        ${s.ageMax ? `<span class="tag">👶 ${ageText(s.ageMin, s.ageMax)}</span>` : ''}
         ${left <= 3 && left > 0 && mode !== 'booking' ? `<span class="tag low">Only ${left} left</span>` : ''}
       </div>
     </div>
@@ -330,8 +371,8 @@ function showStudio(name) { currentStudio = name; renderStudio(); showTab('studi
 function renderStudio() {
   const st = studioByName(currentStudio), el = $('#view-studio');
   if (!st) { el.innerHTML = '<button class="back" data-back>← Back</button><div class="empty">Studio not found</div>'; return; }
-  const ts = allTemplates().filter(x => x.studio.id === st.id).map(x => x.t);
-  const cats = [...new Set(ts.map(t => t[2]))], hoods = [...new Set(ts.map(t => t[3]))];
+  const cs = classes.filter(c => c.studio_id === st.id);
+  const cats = [...new Set(cs.map(c => c.cat))], hoods = [...new Set(cs.map(c => c.hood))];
   const h = hash(st.name), sample = st.owner_id === null;
   const real = reviews.filter(r => r.studio_id === st.id).map(r => [r.author, r.stars, r.body]);
   const seed = sample ? [0, 1, 2].map(i => REVIEW_POOL[(h + i * 2) % REVIEW_POOL.length]) : [];
@@ -379,7 +420,7 @@ async function postReview() {
 // ---------- Views ----------
 function renderBookings() {
   if (!user) { $('#bookingList').innerHTML = `<div class="empty">Log in to see your classes.<br><button class="btn" style="margin-top:12px" data-login>Log in</button></div>`; return; }
-  const list = myBookings.map(b => SESSIONS.find(s => s.id === `${b.class_id}_${b.session_date}`)).filter(Boolean)
+  const list = myBookings.map(sessionFromBooking)
     .sort((a, b) => a.date - b.date || timeVal(a.time) - timeVal(b.time));
   $('#bookingList').innerHTML = list.length
     ? `<div class="grid">${list.map(s => card(s, 'booking')).join('')}</div>`
@@ -421,78 +462,275 @@ function renderProfile() {
     }).join('') : `<p class="meta">Add your child and we'll show classes for their exact age.</p>`}</div>`}`;
 }
 
-// ---------- Studio owners ----------
+// ---------- Studio area ----------
+const studioStats = () => {
+  const st = myStudio();
+  const done = studioBookings.filter(b => b.session_date < todayStr);
+  const up = studioBookings.filter(b => b.session_date >= todayStr);
+  const earned = sum(done, b => b.price_cents);
+  const paid = sum(payouts.filter(p => p.status === 'paid'), p => p.amount_cents);
+  return { st, done, up, earned, paid, owed: earned - paid, upcoming: sum(up, b => b.price_cents) };
+};
+const upcomingForSlot = id => studioBookings.filter(b => b.slot_id === id && b.session_date >= todayStr);
+
 function renderOwner() {
   const el = $('#view-owner');
-  const head = `<h2 style="margin:24px 0 4px">Partner with LittlePass 🏢</h2><p class="meta" style="margin:0">List your classes and reach San Diego families.</p>`;
   if (!user) {
-    el.innerHTML = head + `<div class="panel"><p style="margin-top:0">Create a free studio account to list your classes.</p><button class="btn" data-signup-studio>Sign up as a studio</button> <button class="btn ghost" data-login>Log in</button></div>`;
+    el.innerHTML = `<div class="hero" style="margin-top:20px"><h1>Fill your classes with San Diego families 🐣</h1>
+      <p>List your baby and toddler classes on LittlePass. Set your own prices and schedule, and get paid for every booking.</p></div>
+      <div class="panel"><ul style="margin:0 0 14px;padding-left:18px;line-height:1.8"><li>Add classes with several time slots, spots and prices</li><li>See who booked, in real time</li><li>Track what you've earned and when you were paid</li></ul>
+      <button class="btn" data-signup-studio>Sign up as a studio</button> <button class="btn ghost" data-login>Log in</button></div>`;
     return;
   }
-  if (!profile || profile.role !== 'studio') {
-    el.innerHTML = head + `<div class="panel"><p style="margin-top:0">You're logged in as a <b>parent</b>. Studio tools need a studio account. Log out, then sign up with a different email and choose <b>Studio</b>.</p><button class="btn ghost" data-logout>Log out</button></div>`;
+  if (!isStudioUser()) {
+    el.innerHTML = `<h2 style="margin:24px 0 4px">Partner with LittlePass 🏢</h2><div class="panel"><p style="margin-top:0">You're logged in as a <b>parent</b>. Studio tools need a studio account. Log out, then sign up with a different email and choose <b>Studio</b>.</p><button class="btn ghost" data-logout>Log out</button></div>`;
     return;
   }
-  const st = studios.find(s => s.owner_id === user.id);
+  const st = myStudio();
   if (!st) {
-    el.innerHTML = head + `<div class="panel"><h3 style="margin:0 0 12px">Set up your studio</h3>
+    el.innerHTML = `<h2 style="margin:24px 0 4px">Welcome! Let's set up your studio 🎉</h2><div class="panel">
       <div class="label">Studio name</div><input id="stName" placeholder="e.g. Sunny Days Music">
       <div class="label">Short description</div><textarea id="stBlurb" rows="3" placeholder="What makes your classes special?"></textarea>
       <button class="btn" data-createstudio>Create studio</button></div>`;
     return;
   }
-  const mine = allTemplates().filter(x => x.studio.id === st.id);
-  const sessCount = SESSIONS.filter(s => s.studio === st.name).length;
-  const ages = Array.from({ length: 61 }, (_, m) => m).filter(m => m <= 12 || m % 6 === 0);
-  const opt = (m, sel) => `<option value="${m}" ${m === sel ? 'selected' : ''}>${m < 12 ? m + ' months' : (m / 12) + (m === 12 ? ' year' : ' years')}</option>`;
-  el.innerHTML = head + `
-    <div style="display:flex;gap:10px;margin-top:16px">
-      <div class="stat"><b>${mine.length}</b>class types</div>
-      <div class="stat"><b>${sessCount}</b>sessions this week</div>
-      <div class="stat"><b>${ownerBookings}</b>bookings</div></div>
-    <div class="panel"><div class="label">${esc(st.name)}</div>
-      ${mine.length ? mine.map(x => `<div class="kid"><span style="font-size:24px">${CATS[x.t[2]].emoji}</span>
-        <div><b>${esc(x.t[0])}</b><div class="meta">${x.t[3]} · ${x.t[7].map(d => DOW[d]).join(', ')} · ${x.t[8]} · ⭐ ${x.t[6]}</div></div>
-        <button class="btn ghost" style="margin-left:auto" data-rmclass="${x.key}">Remove</button></div>`).join('')
-        : '<p class="meta">No classes yet. Add your first one below.</p>'}
-      <button class="btn ghost" style="margin-top:10px" data-studio="${esc(st.name)}">View your public page</button></div>
-    <div class="panel"><h3 style="margin:0 0 12px">Add a class</h3>
-      <div class="label">Class name</div><input id="ownTitle" placeholder="e.g. Baby Music Circle">
-      <div class="two"><div><div class="label">Activity</div><select id="ownCat">${Object.entries(CATS).filter(([id]) => id !== 'all').map(([id, c]) => `<option value="${id}">${c.emoji} ${c.label}</option>`).join('')}</select></div>
-      <div><div class="label">Neighborhood</div><select id="ownHood">${HOODS.slice(1).map(h => `<option>${h}</option>`).join('')}</select></div></div>
-      <div class="two"><div><div class="label">Youngest age</div><select id="ownMin">${ages.map(m => opt(m, 6)).join('')}</select></div>
-      <div><div class="label">Oldest age</div><select id="ownMax">${ages.map(m => opt(m, 24)).join('')}</select></div></div>
-      <div class="label">Days</div>
-      <div class="days">${DOW.map((d, i) => `<label><input type="checkbox" value="${i}">${d}</label>`).join('')}</div>
-      <div class="two"><div><div class="label">Start time</div><input id="ownTime" type="time" value="10:00"></div>
-      <div><div class="label">Length (minutes)</div><input id="ownMins" type="number" value="45" min="15" max="180"></div></div>
-      <div class="two"><div><div class="label">Credits per class (1 to 10)</div><input id="ownCredits" type="number" value="4" min="1" max="10"></div>
-      <div><div class="label">Spots per class</div><input id="ownCap" type="number" value="8" min="1" max="50"></div></div>
-      <button class="btn" data-addclass style="padding:12px 20px">Add class to LittlePass</button></div>`;
+  ({ overview: ownerOverview, classes: ownerClasses, bookings: ownerBookingsView, earnings: ownerEarnings, account: ownerAccount }[ownerTab] || ownerOverview)(el, st);
+}
+
+function sessionRoster(st) {
+  // upcoming sessions (next 7 days) with who's booked
+  return SESSIONS.filter(s => s.studioId === st.id).sort((a, b) => a.date - b.date || timeVal(a.time) - timeVal(b.time));
+}
+const bar = (n, cap) => `<div class="fillbar"><div style="width:${cap ? Math.min(100, n / cap * 100) : 0}%"></div></div>`;
+
+function ownerOverview(el, st) {
+  const S = studioStats(), sess = sessionRoster(st);
+  const weekBk = studioBookings.filter(b => b.session_date >= fmt(DAYS[0]) && b.session_date <= fmt(DAYS[6]));
+  const cap = sum(sess, s => s.capacity), taken = sum(sess, s => s.taken);
+  el.innerHTML = `<h2 style="margin:24px 0 4px">Hi, ${esc(st.name)} 👋</h2>
+    <div class="stats">
+      <div class="stat"><b>${weekBk.length}</b>bookings this week</div>
+      <div class="stat"><b>${cap ? Math.round(taken / cap * 100) : 0}%</b>spots filled this week</div>
+      <div class="stat"><b>${money(S.owed)}</b>owed to you</div>
+      <div class="stat"><b>${money(S.upcoming)}</b>booked, coming up</div></div>
+    <h3 style="margin:22px 0 8px">Next sessions</h3>
+    ${sess.length ? `<div class="panel" style="margin-top:0">${sess.slice(0, 8).map(s => `<div class="sess">
+        <div><b>${esc(s.title)}</b><div class="meta">${dayName(s.date)} · ${s.time} · ${s.mins} min</div></div>
+        <div style="text-align:right;min-width:90px"><b>${s.taken}/${s.capacity}</b> booked${bar(s.taken, s.capacity)}</div></div>`).join('')}</div>`
+      : `<div class="panel"><p class="meta" style="margin:0">No sessions in the next 7 days. Add a class and time slots to get started.</p></div>`}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+      <button class="btn" data-goto="o-classes">Manage classes</button>
+      <button class="btn ghost" data-goto="o-bookings">See bookings</button>
+      <button class="btn ghost" data-studio="${esc(st.name)}">View public page</button></div>`;
+}
+
+// ----- Classes & schedule -----
+const slotRow = sl => {
+  const n = upcomingForSlot(sl.id).length;
+  return `<div class="slot ${sl.active ? '' : 'off'}" data-slot="${sl.id}">
+    <div><div class="mini">Day</div><select data-sf="dow">${DOW.map((d, i) => `<option value="${i}" ${i === sl.dow ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
+    <div><div class="mini">Start</div><input type="time" data-sf="start_time" value="${String(sl.start_time).slice(0, 5)}"></div>
+    <div><div class="mini">Minutes</div><input type="number" data-sf="mins" min="15" max="180" value="${sl.mins}"></div>
+    <div><div class="mini">Spots</div><input type="number" data-sf="capacity" min="1" max="50" value="${sl.capacity}"></div>
+    <div><div class="mini">Your price ($)</div><input type="number" data-sf="price" min="0" max="500" step="0.5" value="${(sl.price_cents / 100).toFixed(2)}"></div>
+    <div><div class="mini">Parents pay</div><b class="cr">⭐ ${sl.credits}</b></div>
+    <div><div class="mini">Open</div><input type="checkbox" data-sf="active" ${sl.active ? 'checked' : ''}></div>
+    <div><button class="btn ghost" data-rmslot="${sl.id}" title="Delete this time slot">✕</button></div>
+    ${n ? `<div class="meta slotnote">${n} upcoming booking${n > 1 ? 's' : ''}</div>` : ''}</div>`;
+};
+const ages = Array.from({ length: 61 }, (_, m) => m).filter(m => m <= 12 || m % 6 === 0);
+const ageOpt = (m, sel) => `<option value="${m}" ${m === sel ? 'selected' : ''}>${m < 12 ? m + ' mo' : (m / 12) + (m === 12 ? ' yr' : ' yrs')}</option>`;
+const scheduleForm = () => `
+  <div class="label">Days</div>
+  <div class="days">${DOW.map((d, i) => `<label><input type="checkbox" data-ns="day" value="${i}">${d}</label>`).join('')}</div>
+  <div class="two"><div><div class="label">Start time</div><input data-ns="time" type="time" value="10:00"></div>
+  <div><div class="label">Length (min)</div><input data-ns="mins" type="number" value="45" min="15" max="180"></div></div>
+  <div class="two"><div><div class="label">Spots</div><input data-ns="cap" type="number" value="8" min="1" max="50"></div>
+  <div><div class="label">Your price per booking ($)</div><input data-ns="price" type="number" value="15" min="0" max="500" step="0.5"></div></div>
+  <div class="meta nscr" style="margin:-4px 0 12px">Parents will pay ⭐ … credits</div>`;
+
+function ownerClasses(el, st) {
+  const cs = classes.filter(c => c.studio_id === st.id);
+  el.innerHTML = `<h2 style="margin:24px 0 4px">Classes & schedule</h2>
+    <p class="meta" style="margin:0 0 12px">Set your price for each time slot. Changes save automatically. LittlePass converts your price into the credits parents pay.</p>
+    ${cs.map(c => {
+      const cslots = slots.filter(x => x.class_id === c.id).sort((a, b) => a.dow - b.dow || String(a.start_time).localeCompare(String(b.start_time)));
+      return `<div class="panel classbox" data-classbox="${c.id}">
+        <div class="two"><div><div class="label">Class name</div><input data-cf="title" value="${esc(c.title)}"></div>
+        <div><div class="label">Activity</div><select data-cf="cat">${Object.entries(CATS).filter(([id]) => id !== 'all').map(([id, k]) => `<option value="${id}" ${id === c.cat ? 'selected' : ''}>${k.emoji} ${k.label}</option>`).join('')}</select></div></div>
+        <div class="two three"><div><div class="label">Neighborhood</div><select data-cf="hood">${HOODS.slice(1).map(h => `<option ${h === c.hood ? 'selected' : ''}>${h}</option>`).join('')}</select></div>
+        <div><div class="label">From age</div><select data-cf="age_min">${ages.map(m => ageOpt(m, c.age_min)).join('')}</select></div>
+        <div><div class="label">To age</div><select data-cf="age_max">${ages.map(m => ageOpt(m, c.age_max)).join('')}</select></div></div>
+        <div class="label" style="margin-top:4px">Time slots</div>
+        ${cslots.length ? cslots.map(slotRow).join('') : '<p class="meta">No time slots yet. Add one below.</p>'}
+        <details class="addsched"><summary>＋ Add time slots</summary>${scheduleForm()}<button class="btn" data-addsched="${c.id}">Add slots</button></details>
+        <button class="btn ghost danger" data-rmclass="${c.id}" style="margin-top:12px">Delete class</button></div>`;
+    }).join('') || '<div class="panel"><p class="meta" style="margin:0">No classes yet. Create your first one below.</p></div>'}
+    <details class="panel" id="newClass" ${cs.length ? '' : 'open'}><summary style="font-weight:800;font-size:17px;cursor:pointer">＋ New class</summary>
+      <div style="margin-top:12px"><div class="label">Class name</div><input id="ncTitle" placeholder="e.g. Baby Music Circle">
+      <div class="two"><div><div class="label">Activity</div><select id="ncCat">${Object.entries(CATS).filter(([id]) => id !== 'all').map(([id, k]) => `<option value="${id}">${k.emoji} ${k.label}</option>`).join('')}</select></div>
+      <div><div class="label">Neighborhood</div><select id="ncHood">${HOODS.slice(1).map(h => `<option>${h}</option>`).join('')}</select></div></div>
+      <div class="two"><div><div class="label">From age</div><select id="ncMin">${ages.map(m => ageOpt(m, 6)).join('')}</select></div>
+      <div><div class="label">To age</div><select id="ncMax">${ages.map(m => ageOpt(m, 24)).join('')}</select></div></div>
+      <div class="newsched">${scheduleForm()}</div>
+      <button class="btn" data-createclass style="padding:12px 20px">Create class</button></div></details>`;
+}
+
+function readSchedule(box) {
+  const g = k => box.querySelector(`[data-ns="${k}"]`);
+  const days = [...box.querySelectorAll('[data-ns="day"]:checked')].map(i => +i.value);
+  if (!days.length) { toast('Pick at least one day'); return null; }
+  if (!g('time').value) { toast('Please choose a start time'); return null; }
+  return { days, time: g('time').value + ':00', mins: clamp(+g('mins').value, 15, 180), cap: clamp(+g('cap').value, 1, 50),
+    price: Math.round(clamp(+g('price').value, 0, 500) * 100) };
+}
+const slotRows = (classId, sch) => sch.days.map(d => ({ class_id: classId, dow: d, start_time: sch.time, mins: sch.mins, capacity: sch.cap, price_cents: sch.price }));
+
+async function createClass() {
+  const st = myStudio(), box = $('#newClass .newsched'), title = $('#ncTitle').value.trim();
+  const min = +$('#ncMin').value, max = +$('#ncMax').value;
+  if (!title) return toast('Please name the class');
+  if (max < min) return toast('"To age" must be at least "From age"');
+  const sch = readSchedule(box); if (!sch) return;
+  const { data: c, error } = await sb.from('classes').insert({ studio_id: st.id, title, cat: $('#ncCat').value, hood: $('#ncHood').value, age_min: min, age_max: max }).select().single();
+  if (error) return toast(error.message);
+  const r = await sb.from('class_slots').insert(slotRows(c.id, sch));
+  if (r.error) toast(r.error.message);
+  await refresh(); toast(`✅ ${title} is live!`);
+}
+async function addSlots(classId, box) {
+  const sch = readSchedule(box); if (!sch) return;
+  const { error } = await sb.from('class_slots').insert(slotRows(classId, sch));
+  if (error) return toast(error.message);
+  await refresh(); toast('Time slots added ✓');
+}
+async function saveSlot(el) {
+  const row = el.closest('[data-slot]'), id = row.dataset.slot, sl = slots.find(x => x.id === id), f = el.dataset.sf;
+  const up = upcomingForSlot(id);
+  let patch;
+  if (f === 'dow') patch = { dow: +el.value };
+  else if (f === 'start_time') { if (!el.value) return renderOwner(); patch = { start_time: el.value + ':00' }; }
+  else if (f === 'mins') patch = { mins: clamp(+el.value, 15, 180) };
+  else if (f === 'capacity') patch = { capacity: clamp(+el.value, 1, 50) };
+  else if (f === 'price') patch = { price_cents: Math.round(clamp(+el.value, 0, 500) * 100) };
+  else if (f === 'active') patch = { active: el.checked };
+  if ((f === 'dow' || f === 'start_time') && up.length) { toast('This slot has upcoming bookings. Close it and add a new slot instead.'); return renderOwner(); }
+  if (f === 'capacity') {
+    const perDate = {}; up.forEach(b => { perDate[b.session_date] = (perDate[b.session_date] || 0) + 1; });
+    const max = Math.max(0, ...Object.values(perDate));
+    if (patch.capacity < max) { toast(`${max} spots are already booked on one date. Spots can't go below that.`); return renderOwner(); }
+  }
+  const { data, error } = await sb.from('class_slots').update(patch).eq('id', id).select().single();
+  if (error) { toast(error.message); return renderOwner(); }
+  Object.assign(sl, data); buildSessions();
+  row.classList.toggle('off', !data.active);
+  row.querySelector('.cr').textContent = '⭐ ' + data.credits;
+  toast('Saved ✓');
+}
+async function saveClassField(el) {
+  const id = el.closest('[data-classbox]').dataset.classbox, c = classes.find(x => x.id === id), f = el.dataset.cf;
+  const v = ['age_min', 'age_max'].includes(f) ? +el.value : el.value.trim();
+  const patch = { [f]: v };
+  if (f === 'title' && !v) { toast('Class name can\'t be empty'); return renderOwner(); }
+  if ((f === 'age_min' && v > c.age_max) || (f === 'age_max' && v < c.age_min)) { toast('"To age" must be at least "From age"'); return renderOwner(); }
+  const { error } = await sb.from('classes').update(patch).eq('id', id);
+  if (error) { toast(error.message); return renderOwner(); }
+  c[f] = v; buildSessions(); toast('Saved ✓');
+}
+async function deleteSlot(id) {
+  const n = upcomingForSlot(id).length;
+  if (n && !confirm(`${n} upcoming booking${n > 1 ? 's' : ''} will be cancelled and the parents refunded. Delete this time slot?`)) return;
+  const { error } = await sb.from('class_slots').delete().eq('id', id);
+  if (error) return toast(error.message);
+  await refresh(); toast('Time slot deleted');
+}
+async function deleteClass(id) {
+  const n = studioBookings.filter(b => b.class_id === id && b.session_date >= todayStr).length;
+  if (!confirm(n ? `${n} upcoming booking${n > 1 ? 's' : ''} will be cancelled and the parents refunded. Delete this class?` : 'Delete this class and all its time slots?')) return;
+  const { error } = await sb.from('classes').delete().eq('id', id);
+  if (error) return toast(error.message);
+  await refresh(); toast('Class deleted');
+}
+let previewTimer;
+function previewCredits(input) {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    const box = input.closest('details, .panel'), out = box && box.querySelector('.nscr'); if (!out) return;
+    const { data } = await sb.rpc('preview_credits', { p_price_cents: Math.round(clamp(+input.value, 0, 500) * 100) });
+    if (data != null) out.textContent = `Parents will pay ⭐ ${data} credit${data === 1 ? '' : 's'}`;
+  }, 250);
+}
+
+// ----- Bookings -----
+function ownerBookingsView(el, st) {
+  const list = studioBookings.filter(b => bkFilter === 'upcoming' ? b.session_date >= todayStr : b.session_date < todayStr);
+  const groups = {};
+  list.forEach(b => { (groups[`${b.session_date}_${b.session_time}_${b.slot_id || b.class_title}`] ||= []).push(b); });
+  const keys = Object.keys(groups).sort();
+  if (bkFilter === 'past') keys.reverse();
+  el.innerHTML = `<h2 style="margin:24px 0 4px">Bookings</h2>
+    <div class="seg"><button data-bkf="upcoming" class="${bkFilter === 'upcoming' ? 'on' : ''}">Upcoming</button><button data-bkf="past" class="${bkFilter === 'past' ? 'on' : ''}">Past</button></div>
+    ${keys.length ? keys.slice(0, 60).map(k => {
+      const g = groups[k], b0 = g[0], sl = slots.find(x => x.id === b0.slot_id);
+      return `<div class="panel" style="margin-top:10px"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+        <div><b>${esc(b0.class_title)}</b><div class="meta">${dateLabel(b0.session_date)} · ${t12(b0.session_time)}</div></div>
+        <div style="text-align:right;min-width:90px"><b>${g.length}${sl ? '/' + sl.capacity : ''}</b> booked${sl ? bar(g.length, sl.capacity) : ''}</div></div>
+        ${g.map(b => `<div class="kid"><span style="font-size:22px">👶</span><div><b>${esc(b.attendee_name)}</b><div class="meta">Parent: ${esc(b.parent_name)}</div></div><div style="margin-left:auto" class="cost">${money(b.price_cents)}</div></div>`).join('')}</div>`;
+    }).join('') : `<div class="empty">${bkFilter === 'upcoming' ? 'No upcoming bookings yet.' : 'No past bookings yet.'}</div>`}`;
+}
+
+// ----- Earnings -----
+function ownerEarnings(el, st) {
+  const S = studioStats();
+  const byClass = {};
+  S.done.forEach(b => { const r = (byClass[b.class_title] ||= { n: 0, cents: 0 }); r.n++; r.cents += b.price_cents; });
+  el.innerHTML = `<h2 style="margin:24px 0 4px">Earnings</h2>
+    <p class="meta" style="margin:0">You earn the price you set for each booking. A class counts as earned once it has taken place.</p>
+    <div class="stats" style="margin-top:12px">
+      <div class="stat"><b>${money(S.earned)}</b>earned so far</div>
+      <div class="stat"><b>${money(S.paid)}</b>paid to you</div>
+      <div class="stat"><b>${money(S.owed)}</b>owed to you</div>
+      <div class="stat"><b>${money(S.upcoming)}</b>booked, coming up</div></div>
+    <h3 style="margin:22px 0 8px">Payments</h3>
+    <div class="panel" style="margin-top:0">${payouts.length ? payouts.map(p => `<div class="kid">
+      <div><b>${money(p.amount_cents)}</b><div class="meta">Classes from ${dateLabel(p.period_start)} to ${dateLabel(p.period_end)}${p.reference ? ' · ' + esc(p.reference) : ''}</div></div>
+      <div style="margin-left:auto;text-align:right">${p.status === 'paid'
+        ? `<span class="tag paid">✓ Paid ${new Date(p.paid_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>`
+        : '<span class="tag pend">Processing</span>'}</div></div>`).join('')
+      : '<p class="meta" style="margin:0">No payments yet. They\'ll show up here with the date they were sent.</p>'}</div>
+    <h3 style="margin:22px 0 8px">By class</h3>
+    <div class="panel" style="margin-top:0">${Object.keys(byClass).length ? Object.entries(byClass).map(([t, r]) => `<div class="kid"><div><b>${esc(t)}</b><div class="meta">${r.n} booking${r.n > 1 ? 's' : ''} completed</div></div><div style="margin-left:auto" class="cost">${money(r.cents)}</div></div>`).join('')
+      : '<p class="meta" style="margin:0">Completed bookings will show up here.</p>'}</div>`;
+}
+
+// ----- Account -----
+function ownerAccount(el, st) {
+  el.innerHTML = `<h2 style="margin:24px 0 4px">Account</h2>
+    <div class="panel"><div class="label">Studio name</div><input id="acName" value="${esc(st.name)}">
+      <div class="label">Description</div><textarea id="acBlurb" rows="3">${esc(st.blurb || '')}</textarea>
+      <button class="btn" data-savestudio>Save</button> <button class="btn ghost" data-studio="${esc(st.name)}">View public page</button></div>
+    <div class="panel"><div class="label">Login</div><div class="meta" style="margin-bottom:12px">${esc(user.email)}</div><button class="btn ghost" data-logout>Log out</button></div>`;
+}
+async function saveStudio() {
+  const st = myStudio(), name = $('#acName').value.trim();
+  if (!name) return toast('Studio name can\'t be empty');
+  const { error } = await sb.from('studios').update({ name, blurb: $('#acBlurb').value.trim() || null }).eq('id', st.id);
+  if (error) return toast(error.message.includes('duplicate') ? 'That studio name is taken' : error.message);
+  await refresh(); toast('Saved ✓');
 }
 async function createStudio() {
   const name = $('#stName').value.trim();
   if (!name) return toast('Please enter your studio name');
   const { error } = await sb.from('studios').insert({ owner_id: user.id, name, blurb: $('#stBlurb').value.trim() || null });
   if (error) return toast(error.message.includes('duplicate') ? 'That studio name is taken' : error.message);
-  await refresh(); renderOwner(); toast('Studio created 🎉');
+  ownerTab = 'classes'; await refresh(); toast('Studio created 🎉 Now add your first class');
 }
-async function addClass() {
-  const st = studios.find(s => s.owner_id === user.id);
-  const title = $('#ownTitle').value.trim();
-  const days = [...document.querySelectorAll('#view-owner .days input:checked')].map(i => +i.value);
-  const min = +$('#ownMin').value, max = +$('#ownMax').value;
-  if (!title) return toast('Please name the class');
-  if (!days.length) return toast('Pick at least one day');
-  if (max < min) return toast('Oldest age must be at least the youngest age');
-  if (!$('#ownTime').value) return toast('Please choose a start time');
-  const { error } = await sb.from('classes').insert({
-    studio_id: st.id, title, cat: $('#ownCat').value, hood: $('#ownHood').value, age_min: min, age_max: max,
-    credits: Math.min(10, Math.max(1, +$('#ownCredits').value || 4)), days, start_time: to12($('#ownTime').value),
-    mins: Math.min(180, Math.max(15, +$('#ownMins').value || 45)), capacity: Math.min(50, Math.max(1, +$('#ownCap').value || 8)) });
-  if (error) return toast(error.message);
-  await refresh(); renderOwner(); toast(`✅ ${title} is live in the app!`);
-}
+const ov = $('#view-owner');
+ov.addEventListener('change', e => {
+  const s = e.target.closest('[data-sf]'); if (s) return saveSlot(s);
+  const c = e.target.closest('[data-cf]'); if (c) return saveClassField(c);
+});
+ov.addEventListener('input', e => { if (e.target.matches('[data-ns="price"]')) previewCredits(e.target); });
 
 // ---------- Clicks ----------
 async function handleClick(e) {
@@ -505,17 +743,18 @@ async function handleClick(e) {
   if (hit('[data-signup]')) { openAuth('signup', '', 'parent'); return; }
   if (hit('[data-signup-studio]')) { openAuth('signup', '', 'studio'); return; }
   if (hit('[data-goexplore]')) { showTab('explore'); return; }
-  if (hit('[data-logout]')) { await sb.auth.signOut(); showTab('explore'); toast('Logged out'); return; }
+  if (hit('[data-logout]')) { await sb.auth.signOut(); profile = null; renderNav(); showTab('explore'); toast('Logged out'); return; }
   if ((el = hit('[data-authmode]'))) { openAuth(el.dataset.authmode, authState.reason); return; }
   if ((el = hit('[data-authrole]'))) { openAuth('signup', authState.reason, el.dataset.authrole); return; }
   if (hit('[data-authgo]')) { authGo(); return; }
   if (hit('[data-createstudio]')) { createStudio(); return; }
-  if (hit('[data-addclass]')) { addClass(); return; }
-  if ((el = hit('[data-rmclass]'))) {
-    const { error } = await sb.from('classes').delete().eq('id', el.dataset.rmclass);
-    if (error) return toast(error.message);
-    await refresh(); renderOwner(); toast('Class removed'); return;
-  }
+  if (hit('[data-createclass]')) { createClass(); return; }
+  if (hit('[data-savestudio]')) { saveStudio(); return; }
+  if ((el = hit('[data-addsched]'))) { addSlots(el.dataset.addsched, el.closest('details')); return; }
+  if ((el = hit('[data-rmslot]'))) { deleteSlot(el.dataset.rmslot); return; }
+  if ((el = hit('[data-rmclass]'))) { deleteClass(el.dataset.rmclass); return; }
+  if ((el = hit('[data-goto]'))) { showTab(el.dataset.goto); return; }
+  if ((el = hit('[data-bkf]'))) { bkFilter = el.dataset.bkf; renderOwner(); return; }
   if (hit('[data-addkid]')) {
     const name = $('#kidName').value.trim(), bday = $('#kidBday').value;
     if (!name || !bday) return toast('Please add a name and birthday');
@@ -537,6 +776,8 @@ async function handleClick(e) {
       <h2>${esc(s.title)}</h2>
       <div class="meta">${esc(s.studio)} · ${s.hood}<br>${dayName(s.date)} at ${s.time} · ${s.mins} min<br>Ages ${ageText(s.ageMin, s.ageMax)}</div>
       <p><b>Cost: ⭐ ${s.credits} credits</b> · You have ${credits}</p>
+      <div class="label">Who's coming?</div>
+      <select id="bkWho">${kids.map(k => `<option value="${esc(k.name)}">${esc(k.name)}</option>`).join('')}<option value="">${kids.length ? 'Someone else' : 'My little one'}</option></select>
       ${enough ? '' : `<p class="low">You need ${s.credits - credits} more credits. Pick a plan to top up.</p>`}
       <div class="actions"><button class="btn ghost" data-close>Not now</button>
         ${enough ? `<button class="btn" data-confirm="${s.id}">Confirm booking</button>` : `<button class="btn" data-goplans>See plans</button>`}</div>`);
@@ -544,14 +785,15 @@ async function handleClick(e) {
   }
   if ((el = hit('[data-confirm]'))) {
     const s = SESSIONS.find(x => x.id === el.dataset.confirm);
+    const who = ($('#bkWho') || {}).value || null;
     el.disabled = true;
-    const { error } = await sb.rpc('book_class', { p_class: s.key, p_date: s.dateStr });
+    const { error } = await sb.rpc('book_class', { p_slot: s.key, p_date: s.dateStr, p_attendee: ($('#bkWho') || {}).value || null });
     closeModal();
     if (error) { toast(error.message); await refresh(); return; }
     await refresh(); toast(`🎉 Booked ${s.title}!`); return;
   }
   if ((el = hit('[data-cancel]'))) {
-    const s = SESSIONS.find(x => x.id === el.dataset.cancel), b = bookingFor(s.id);
+    const b = bookingFor(el.dataset.cancel), s = sessionFromBooking(b);
     const { error } = await sb.rpc('cancel_booking', { p_booking: b.id });
     if (error) return toast(error.message);
     await refresh(); toast(`Cancelled. ⭐ ${s.credits} credits refunded`); return;
@@ -568,14 +810,20 @@ async function handleClick(e) {
 document.body.addEventListener('click', handleClick);
 
 // ---------- Tabs ----------
+const VIEWS = ['explore', 'bookings', 'plans', 'profile', 'studio', 'owner'];
 function showTab(name) {
-  ['explore', 'bookings', 'plans', 'profile', 'studio', 'owner'].forEach(t => $('#view-' + t).classList.toggle('hidden', t !== name));
-  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
-  if (!['studio', 'owner'].includes(name)) lastTab = name;
-  if (name === 'bookings') renderBookings();
-  if (name === 'plans') renderPlans();
-  if (name === 'profile') renderProfile();
-  if (name === 'owner') renderOwner();
+  let view = name;
+  if (name.startsWith('o-')) { ownerTab = name.slice(2); view = 'owner'; }
+  else if (name === 'owner' && isStudioUser()) ownerTab = 'overview';
+  currentView = view;
+  VIEWS.forEach(t => $('#view-' + t).classList.toggle('hidden', t !== view));
+  markNav();
+  if (!['studio', 'owner'].includes(view)) lastTab = view;
+  else if (view === 'owner') lastTab = name.startsWith('o-') ? name : 'owner';
+  if (view === 'bookings') renderBookings();
+  if (view === 'plans') renderPlans();
+  if (view === 'profile') renderProfile();
+  if (view === 'owner') renderOwner();
   window.scrollTo(0, 0);
 }
 document.querySelector('nav.tabs').onclick = e => { const b = e.target.closest('[data-tab]'); if (b) showTab(b.dataset.tab); };
@@ -593,8 +841,15 @@ renderAll();
   catch (err) { $('#results').innerHTML = `<div class="empty">Couldn't load classes. Please refresh.<br><small>${esc(err.message || err)}</small></div>`; return; }
   loaded = true; buildSessions(); renderAll();
   // Fires once right away with the saved session, then on every login/logout
-  sb.auth.onAuthStateChange((_event, session) => {
+  sb.auth.onAuthStateChange((event, session) => {
     user = session ? session.user : null;
-    setTimeout(async () => { await loadPrivate(); buildSessions(); renderAll(); }, 0);
+    const uid = user ? user.id : null;
+    if (uid === lastUid && event !== 'INITIAL_SESSION') return; // ignore token refreshes
+    lastUid = uid;
+    setTimeout(async () => {
+      await loadPrivate(); buildSessions(); renderAll();
+      if (isStudioUser() && !['owner', 'studio'].includes(currentView)) showTab('o-overview');
+      if (!user && currentView === 'owner') showTab('explore');
+    }, 0);
   });
 })();

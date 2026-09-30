@@ -178,6 +178,30 @@
   .modal { max-height: 92vh; overflow-y: auto; }
   .modal input { font: inherit; width: 100%; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 12px; margin-bottom: 12px; }
   .err { color: #c0392b; font-weight: 700; min-height: 1em; }
+  /* Studio area */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 16px; }
+  .stat { text-align: center; }
+  .stat b { font-size: 24px; }
+  .mini { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 3px; }
+  .slot { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 8px; align-items: end; padding: 10px; margin-bottom: 8px; background: #fbf7f2; border-radius: 14px; }
+  .slot.off { opacity: .55; }
+  .slot input[type=number], .slot input[type=time], .slot select { margin: 0; padding: 7px 8px; font-size: 14px; }
+  .slot input[type=checkbox] { width: 22px; height: 22px; margin: 4px 0 0; accent-color: var(--brand); }
+  .slot .btn { padding: 6px 10px; }
+  .slot .cr { display: block; padding: 7px 0; }
+  .slotnote { grid-column: 1 / -1; margin-top: -2px; }
+  .two.three { grid-template-columns: 2fr 1fr 1fr; }
+  .classbox { padding: 18px; }
+  .addsched { margin-top: 10px; }
+  .addsched summary, .panel > summary { cursor: pointer; font-weight: 800; color: var(--brand-dark); padding: 6px 0; }
+  .addsched > div.days, .addsched > .label { margin-top: 8px; }
+  .danger { color: #c0392b; border-color: #f0cfca; }
+  .fillbar { height: 6px; border-radius: 99px; background: #efe7df; margin-top: 5px; overflow: hidden; }
+  .fillbar div { height: 100%; background: var(--leaf); border-radius: 99px; }
+  .sess { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .sess:last-child { border-bottom: 0; }
+  .tag.paid { background: #e2f4e3; color: #2d6a31; }
+  .tag.pend { background: #fff1cc; color: #8a6100; }
   .hidden { display: none !important; }
 </style>
 </head>
