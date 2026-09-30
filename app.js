@@ -33,7 +33,7 @@ const COORDS = {
   'Chula Vista': [32.6401, -117.0842], 'Del Mar': [32.9595, -117.2653],
 };
 const PLANS = [
-  { id: 'sprout', name: 'Sprout', price: 49,  credits: 12, perks: ['About 3 classes / month', 'Book 7 days ahead', 'Free cancellation'] },
+  { id: 'sprout', name: 'Sprout', price: 49,  credits: 12, perks: ['About 3 classes / month', 'Book 7 days ahead', 'Free cancellation up to 24h before'] },
   { id: 'bloom',  name: 'Bloom',  price: 89,  credits: 25, perks: ['About 6 classes / month', 'Book 14 days ahead', 'Bring a sibling for +2 credits'], pop: true },
   { id: 'grove',  name: 'Grove',  price: 149, credits: 45, perks: ['About 11 classes / month', 'Priority waitlist', 'Unused credits roll over'] },
 ];
@@ -49,7 +49,7 @@ const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // ---------- State ----------
 let user = null, profile = null, kids = [], myBookings = [], studioBookings = [], payouts = [];
-let studios = [], classes = [], slots = [], counts = {}, reviews = [], loaded = false;
+let studios = [], classes = [], slots = [], counts = {}, reviews = [], loaded = false, cancelHours = 24;
 let filters = { age: 'all', cat: 'all', hood: HOODS[0], day: 'all' };
 let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentStudio = null;
 let authState = { mode: 'login', role: 'parent', reason: '' };
@@ -93,13 +93,15 @@ $('#modalBg').onclick = e => { if (e.target.id === 'modalBg' || e.target.dataset
 
 // ---------- Data ----------
 async function loadPublic() {
-  const [st, cl, sl, rv, ct] = await Promise.all([
+  const [st, cl, sl, rv, ct, ch] = await Promise.all([
     sb.from('studios').select('*'),
     sb.from('classes').select('*'),
     sb.from('class_slots').select('*'),
     sb.from('reviews').select('*').order('created_at'),
     sb.rpc('booked_counts', { p_from: fmt(DAYS[0]), p_to: fmt(DAYS[6]) }),
+    sb.rpc('get_cancel_hours'),
   ]);
+  if (typeof ch.data === 'number') cancelHours = ch.data;
   if (st.error || cl.error || sl.error) throw (st.error || cl.error || sl.error);
   studios = st.data; classes = cl.data; slots = sl.data; reviews = rv.data || [];
   counts = {};
@@ -150,7 +152,7 @@ function buildSessions() {
       const dateStr = fmt(d), id = `${sl.id}_${dateStr}`, taken = counts[id] || 0;
       SESSIONS.push({ id, key: sl.id, classId: c.id, studioId: st.id, dateStr, title: c.title, studio: st.name, cat: c.cat, hood: c.hood,
         ageMin: c.age_min, ageMax: c.age_max, credits: sl.credits, priceCents: sl.price_cents, date: d,
-        time: t12(sl.start_time), mins: sl.mins, capacity: sl.capacity, taken, spots: sl.capacity - taken });
+        time: t12(sl.start_time), time24: String(sl.start_time).slice(0, 8), mins: sl.mins, capacity: sl.capacity, taken, spots: sl.capacity - taken });
       any = true;
     });
     if (any && COORDS[c.hood] && !PARTNERS.find(x => x.studio === st.name && x.hood === c.hood)) {
@@ -159,6 +161,7 @@ function buildSessions() {
     }
   });
 }
+const cancellable = b => new Date(`${b.session_date}T${b.session_time}`) - Date.now() >= cancelHours * 36e5;
 const bookingFor = id => myBookings.find(b => `${b.slot_id}_${b.session_date}` === id);
 const isBooked = id => !!bookingFor(id);
 // A booked class, even if the studio has since changed or paused the slot
@@ -272,7 +275,8 @@ function matches(s) {
 function card(s, mode) {
   const c = CATS[s.cat], booked = isBooked(s.id), left = s.spots;
   let action;
-  if (mode === 'booking') action = `<button class="btn ghost" data-cancel="${s.id}">Cancel</button>`;
+  const bk = mode === 'booking' && bookingFor(s.id);
+  if (mode === 'booking') action = bk && !cancellable(bk) ? `<button class="btn ghost" disabled>Can't cancel</button><div class="meta" style="font-size:11px">Within ${cancelHours}h of start</div>` : `<button class="btn ghost" data-cancel="${s.id}">Cancel</button>`;
   else if (booked) action = `<button class="btn ghost" disabled>✓ Booked</button>`;
   else if (left <= 0) action = `<button class="btn" disabled>Full</button>`;
   else action = `<button class="btn" data-book="${s.id}">Book</button>`;
@@ -771,6 +775,7 @@ async function handleClick(e) {
     if (!user) return openAuth('login', 'Log in or sign up to book classes. New accounts start with 10 free credits.');
     if (profile && profile.role === 'studio') return toast('Studio accounts can\'t book classes. Use a parent account.');
     const s = SESSIONS.find(x => x.id === el.dataset.book), credits = profile ? profile.credits : 0, enough = credits >= s.credits;
+    const late = new Date(`${s.dateStr}T${s.time24}`) - Date.now() < cancelHours * 36e5;
     openModal(`
       <div class="emoji" style="background:${CATS[s.cat].color};margin-bottom:12px">${CATS[s.cat].emoji}</div>
       <h2>${esc(s.title)}</h2>
@@ -778,6 +783,7 @@ async function handleClick(e) {
       <p><b>Cost: ⭐ ${s.credits} credits</b> · You have ${credits}</p>
       <div class="label">Who's coming?</div>
       <select id="bkWho">${kids.map(k => `<option value="${esc(k.name)}">${esc(k.name)}</option>`).join('')}<option value="">${kids.length ? 'Someone else' : 'My little one'}</option></select>
+      <p class="meta" style="margin:0 0 4px">${late ? `⚠️ This class starts within ${cancelHours} hours, so this booking <b>can't be cancelled</b> or refunded.` : `Free cancellation up to ${cancelHours} hours before the class starts.`}</p>
       ${enough ? '' : `<p class="low">You need ${s.credits - credits} more credits. Pick a plan to top up.</p>`}
       <div class="actions"><button class="btn ghost" data-close>Not now</button>
         ${enough ? `<button class="btn" data-confirm="${s.id}">Confirm booking</button>` : `<button class="btn" data-goplans>See plans</button>`}</div>`);
