@@ -55,6 +55,7 @@ let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentS
 let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
+let adminPay = [], adminPayouts = [], adminPricing = null;
 
 // ---------- Helpers ----------
 const $ = s => document.querySelector(s);
@@ -109,10 +110,15 @@ async function loadPublic() {
   (ct.data || []).forEach(r => { counts[`${r.slot_id}_${r.session_date}`] = Number(r.taken); });
 }
 async function loadPrivate() {
-  kids = []; myBookings = []; studioBookings = []; payouts = []; adminStudios = [];
+  kids = []; myBookings = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null;
   if (!user) { profile = null; return; }
   profile = (await sb.from('profiles').select('*').eq('id', user.id).single()).data;
-  if (profile && profile.role === 'admin') { adminStudios = (await sb.rpc('admin_list_studios')).data || []; return; }
+  if (profile && profile.role === 'admin') {
+    const [s, p, pr, po] = await Promise.all([sb.rpc('admin_list_studios'), sb.rpc('admin_payout_summary'),
+      sb.rpc('admin_get_pricing'), sb.from('payouts').select('*').order('created_at', { ascending: false })]);
+    adminStudios = s.data || []; adminPay = p.data || []; adminPricing = (pr.data || [])[0] || null; adminPayouts = po.data || [];
+    return;
+  }
   if (profile && profile.role === 'studio') {
     const st = studios.find(s => s.owner_id === user.id);
     if (st) {
@@ -182,7 +188,7 @@ const isStudioUser = () => !!(user && profile && profile.role === 'studio');
 function renderNav() {
   const pend = adminStudios.filter(s => s.status === 'pending').length;
   const items = isAdmin()
-    ? [['a-studios', '🏢', 'Studios' + (pend ? ` (${pend})` : '')], ['a-account', '⚙️', 'Account']]
+    ? [['a-studios', '🏢', 'Studios' + (pend ? ` (${pend})` : '')], ['a-payouts', '💸', 'Payouts' + (adminPayouts.some(p => p.status === 'pending') ? ' •' : '')], ['a-pricing', '🧮', 'Pricing'], ['a-account', '⚙️', 'Account']]
     : isStudioUser()
     ? [['o-overview', '📊', 'Overview'], ['o-classes', '📚', 'Classes'], ['o-bookings', '📅', 'Bookings'], ['o-earnings', '💰', 'Earnings'], ['o-account', '⚙️', 'Account']]
     : [['explore', '🔍', 'Explore'], ['bookings', '📅', 'My classes'], ['plans', '⭐', 'Plans'], ['profile', '👶', 'Family']];
@@ -791,6 +797,8 @@ function renderAdmin() {
     el.innerHTML = `<h2 style="margin:24px 0 4px">Account</h2><div class="panel"><div class="label">Admin login</div><div class="meta" style="margin-bottom:12px">${esc(user.email)}</div><button class="btn ghost" data-logout>Log out</button></div>`;
     return;
   }
+  if (adminTab === 'payouts') return renderAdminPayouts(el);
+  if (adminTab === 'pricing') return renderAdminPricing(el);
   const n = st => adminStudios.filter(s => s.status === st).length;
   const list = adminStudios.filter(s => adminFilter === 'all' || s.status === adminFilter);
   el.innerHTML = `<h2 style="margin:24px 0 4px">Studios</h2>
@@ -810,6 +818,81 @@ async function setStudioStatus(id, to) {
   await refresh(); toast(to === 'approved' ? `✅ ${s.name} approved` : `${s.name} ${s.status === 'approved' ? 'suspended' : 'rejected'}`);
 }
 
+
+// ----- Admin: payouts -----
+const yesterdayStr = (() => { const d = new Date(today); d.setDate(d.getDate() - 1); return fmt(d); })();
+function renderAdminPayouts(el) {
+  const N = k => sum(adminPay, r => Number(r[k]) || 0);
+  const pending = adminPayouts.filter(p => p.status === 'pending'), paidList = adminPayouts.filter(p => p.status === 'paid');
+  const sname = id => (studioById(id) || { name: 'Studio' }).name;
+  const active = adminPay.filter(r => Number(r.earned_cents) || Number(r.upcoming_cents));
+  el.innerHTML = `<h2 style="margin:24px 0 4px">Payouts</h2>
+    <p class="meta" style="margin:0">Studios earn the price they set for each completed booking. Create a payout to bundle what you owe, send the money yourself, then mark it paid.</p>
+    <div class="stats">
+      <div class="stat"><b>${money(N('ready_cents'))}</b>ready to pay</div>
+      <div class="stat"><b>${money(N('pending_cents'))}</b>payouts in progress</div>
+      <div class="stat"><b>${money(N('paid_cents'))}</b>paid out</div>
+      <div class="stat"><b>${money(N('upcoming_cents'))}</b>booked, coming up</div></div>
+    <h3 style="margin:22px 0 8px">By studio</h3>
+    <div class="panel" style="margin-top:0">${active.length ? active.map(r => `<div class="sess" style="align-items:flex-start">
+      <div><b>${esc(r.studio_name)}</b><div class="meta">${esc(r.owner_email || 'Sample partner')}<br>Earned ${money(r.earned_cents)} · Paid ${money(r.paid_cents)}${Number(r.pending_cents) ? ' · In progress ' + money(r.pending_cents) : ''}</div></div>
+      <div style="text-align:right">${Number(r.ready_cents) ? `<b>${money(r.ready_cents)}</b><div class="meta">${r.ready_count} booking${Number(r.ready_count) > 1 ? 's' : ''}</div><button class="btn" style="margin-top:6px" data-mkpayout="${r.studio_id}">Create payout</button>` : '<span class="meta">Nothing to pay</span>'}</div></div>`).join('')
+      : '<p class="meta" style="margin:0">No studio earnings yet. Bookings count once the class has taken place.</p>'}</div>
+    <h3 style="margin:22px 0 8px">Waiting to be sent</h3>
+    <div class="panel" style="margin-top:0">${pending.length ? pending.map(p => `<div class="sess"><div><b>${esc(sname(p.studio_id))}</b> · ${money(p.amount_cents)}<div class="meta">Classes ${dateLabel(p.period_start)} to ${dateLabel(p.period_end)}</div></div>
+      <button class="btn" data-markpaid="${p.id}">Mark as paid</button></div>`).join('') : '<p class="meta" style="margin:0">Nothing waiting.</p>'}
+      ${pending.length ? '<div class="meta" style="margin-top:8px">Send the money first (Zelle, bank transfer, etc.), then mark it paid. The studio sees it as "Paid" with today\'s date.</div>' : ''}</div>
+    <h3 style="margin:22px 0 8px">Paid</h3>
+    <div class="panel" style="margin-top:0">${paidList.length ? paidList.map(p => `<div class="sess"><div><b>${esc(sname(p.studio_id))}</b> · ${money(p.amount_cents)}<div class="meta">${p.reference ? esc(p.reference) + ' · ' : ''}Classes ${dateLabel(p.period_start)} to ${dateLabel(p.period_end)}</div></div>
+      <span class="tag paid">✓ ${new Date(p.paid_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>`).join('') : '<p class="meta" style="margin:0">No payouts sent yet.</p>'}</div>`;
+}
+async function makePayout(studioId) {
+  const r = adminPay.find(x => x.studio_id === studioId);
+  if (!confirm(`Create a ${money(r.ready_cents)} payout for ${r.studio_name}, covering ${r.ready_count} completed booking(s) through ${dateLabel(yesterdayStr)}?`)) return;
+  const { error } = await sb.rpc('admin_create_payout', { p_studio: studioId, p_through: yesterdayStr });
+  if (error) return toast(error.message);
+  await refresh(); toast('Payout created. Send the money, then mark it paid.');
+}
+async function markPaid(payoutId) {
+  const p = adminPayouts.find(x => x.id === payoutId);
+  const ref = prompt(`Only continue once you've sent ${money(p.amount_cents)} to ${(studioById(p.studio_id) || {}).name}.\nNote for your records (e.g. "Zelle 10/2"):`, '');
+  if (ref === null) return;
+  const { error } = await sb.rpc('admin_mark_payout_paid', { p_payout: payoutId, p_reference: ref.trim() || null });
+  if (error) return toast(error.message);
+  await refresh(); toast('Marked as paid ✓');
+}
+
+// ----- Admin: pricing -----
+const creditsFor = (cents, cv, m, max) => Math.max(1, Math.min(max, Math.ceil(cents / (cv * (1 - m / 100)))));
+function pricingExamples() {
+  const cv = Math.round((+$('#prCv').value || 0) * 100), m = +$('#prMargin').value || 0, max = +$('#prMax').value || 30;
+  if (!cv) return;
+  $('#prEx').innerHTML = [800, 1500, 2500, 4000].map(c => `<div class="stat"><b>⭐ ${creditsFor(c, cv, m, max)}</b>for a ${money(c)} class</div>`).join('');
+}
+function renderAdminPricing(el) {
+  const P = adminPricing;
+  if (!P) { el.innerHTML = '<div class="empty">Couldn\'t load pricing settings.</div>'; return; }
+  el.innerHTML = `<h2 style="margin:24px 0 4px">Pricing</h2>
+    <p class="meta" style="margin:0">Studios enter a price in dollars. This rule turns it into the credits parents pay:<br><b>credits = price ÷ (credit value × (1 − margin)), rounded up</b></p>
+    <div class="panel"><div class="two"><div><div class="label">Credit value ($)</div><input id="prCv" type="number" step="0.05" min="0.5" max="20" value="${(P.credit_value_cents / 100).toFixed(2)}"></div>
+      <div><div class="label">Your margin (%)</div><input id="prMargin" type="number" step="1" min="0" max="80" value="${P.margin_pct}"></div></div>
+      <div class="two"><div><div class="label">Max credits per class</div><input id="prMax" type="number" min="1" max="100" value="${P.max_credits}"></div>
+      <div><div class="label">Free cancellation (hours before class)</div><input id="prHrs" type="number" min="0" max="168" value="${P.cancel_hours}"></div></div>
+      <div class="label">What parents would pay</div><div class="stats" id="prEx" style="margin:0 0 14px"></div>
+      <button class="btn" data-savepricing>Save and recalculate all classes</button></div>
+    <h3 style="margin:22px 0 8px">What a credit really earns you</h3>
+    <div class="panel" style="margin-top:0">${PLANS.map(p => `<div class="sess"><div><b>${p.name}</b> · $${p.price}/month for ${p.credits} credits</div><b>$${(p.price / p.credits).toFixed(2)} per credit</b></div>`).join('')}
+      <div class="meta" style="margin-top:8px">Set <b>credit value</b> at or below your lowest figure here, or you'll give away more margin than you intend when parents buy the big plan. Unused credits are extra profit for you.</div></div>`;
+  pricingExamples();
+}
+async function savePricing() {
+  const { error } = await sb.rpc('admin_set_pricing', { p_credit_value_cents: Math.round((+$('#prCv').value || 0) * 100),
+    p_margin_pct: +$('#prMargin').value, p_max_credits: +$('#prMax').value, p_cancel_hours: +$('#prHrs').value });
+  if (error) return toast(error.message);
+  await refresh(); toast('Saved. All class prices recalculated ✓');
+}
+$('#view-admin').addEventListener('input', e => { if (e.target.closest('#prCv, #prMargin, #prMax')) pricingExamples(); });
+
 // ---------- Clicks ----------
 async function handleClick(e) {
   const t = e.target, hit = sel => t.closest(sel);
@@ -827,6 +910,9 @@ async function handleClick(e) {
   if (hit('[data-authgo]')) { authGo(); return; }
   if (hit('[data-forgot]')) { forgotPassword(); return; }
   if (hit('[data-setpass]')) { setNewPassword(); return; }
+  if ((el = hit('[data-mkpayout]'))) { makePayout(el.dataset.mkpayout); return; }
+  if ((el = hit('[data-markpaid]'))) { markPaid(el.dataset.markpaid); return; }
+  if (hit('[data-savepricing]')) { savePricing(); return; }
   if ((el = hit('[data-setstatus]'))) { setStudioStatus(el.dataset.setstatus, el.dataset.to); return; }
   if ((el = hit('[data-adminf]'))) { adminFilter = el.dataset.adminf; renderAdmin(); return; }
   if (hit('[data-createstudio]')) { createStudio(); return; }
