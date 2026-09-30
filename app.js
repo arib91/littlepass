@@ -50,7 +50,7 @@ const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // ---------- State ----------
 let user = null, profile = null, kids = [], myBookings = [], studioBookings = [], payouts = [];
 let studios = [], classes = [], slots = [], counts = {}, reviews = [], loaded = false, cancelHours = 24;
-let filters = { age: 'all', cat: 'all', hood: HOODS[0], day: 'all' };
+let filters = { age: 'all', cat: 'all', hood: HOODS[0], day: 'all', studio: 'all', cls: 'all', q: '' };
 let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentStudio = null;
 let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
@@ -284,12 +284,22 @@ function renderFilters() {
     `<button class="chip ${filters.age === 'kid' + i ? 'on' : ''}" data-age="kid${i}">👶 ${esc(k.name)}</button>`).join('');
   $('#catChips').innerHTML = Object.entries(CATS).map(([id, c]) =>
     `<button class="chip ${filters.cat === id ? 'on' : ''}" data-cat="${id}">${c.emoji} ${c.label}</button>`).join('');
+  const studioNames = [...new Set(SESSIONS.map(s => s.studio))].sort((a, b) => a.localeCompare(b));
+  const classTitles = [...new Set(SESSIONS.filter(s => filters.studio === 'all' || s.studio === filters.studio).map(s => s.title))].sort((a, b) => a.localeCompare(b));
+  if (filters.studio !== 'all' && !studioNames.includes(filters.studio)) filters.studio = 'all';
+  if (filters.cls !== 'all' && !classTitles.includes(filters.cls)) filters.cls = 'all';
+  $('#studioSel').innerHTML = `<option value="all">All studios</option>` + studioNames.map(n => `<option value="${esc(n)}" ${filters.studio === n ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  $('#classSel').innerHTML = `<option value="all">All classes</option>` + classTitles.map(n => `<option value="${esc(n)}" ${filters.cls === n ? 'selected' : ''}>${esc(n)}</option>`).join('');
   $('#hoodSel').innerHTML = HOODS.map(h => `<option ${filters.hood === h ? 'selected' : ''}>${h}</option>`).join('');
   $('#daySel').innerHTML = `<option value="all">Next 7 days</option>` +
     DAYS.map((d, i) => `<option value="${i}" ${filters.day == i ? 'selected' : ''}>${dayName(d)}</option>`).join('');
 }
 $('#ageChips').onclick = e => { const b = e.target.closest('[data-age]'); if (!b) return; filters.age = b.dataset.age; renderFilters(); renderResults(); };
 $('#catChips').onclick = e => { const b = e.target.closest('[data-cat]'); if (!b) return; filters.cat = b.dataset.cat; renderFilters(); renderResults(); };
+$('#studioSel').onchange = e => { filters.studio = e.target.value; renderFilters(); renderResults(); };
+$('#classSel').onchange = e => { filters.cls = e.target.value; renderResults(); };
+let searchTimer;
+$('#searchBox').oninput = e => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { filters.q = e.target.value; renderResults(); }, 120); };
 $('#hoodSel').onchange = e => { filters.hood = e.target.value; renderResults(); };
 $('#daySel').onchange = e => { filters.day = e.target.value; renderResults(); };
 
@@ -303,7 +313,30 @@ function matches(s) {
   if (filters.cat !== 'all' && s.cat !== filters.cat) return false;
   if (filters.hood !== HOODS[0] && s.hood !== filters.hood) return false;
   if (filters.day !== 'all' && s.date.getTime() !== DAYS[+filters.day].getTime()) return false;
+  if (filters.studio !== 'all' && s.studio !== filters.studio) return false;
+  if (filters.cls !== 'all' && s.title !== filters.cls) return false;
+  const terms = filters.q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length) {
+    const hay = `${s.title} ${s.studio} ${s.hood} ${CATS[s.cat].label}`.toLowerCase();
+    if (!terms.every(t => hay.includes(t))) return false;
+  }
   return true;
+}
+const filtersActive = () => filters.age !== 'all' || filters.cat !== 'all' || filters.hood !== HOODS[0] || filters.day !== 'all'
+  || filters.studio !== 'all' || filters.cls !== 'all' || !!filters.q.trim();
+function clearFilters() {
+  filters = { age: 'all', cat: 'all', hood: HOODS[0], day: 'all', studio: 'all', cls: 'all', q: '' };
+  $('#searchBox').value = ''; renderFilters(); renderResults();
+}
+// Studios matching the search box or the studio dropdown, shown as quick links
+function renderStudioHits() {
+  const el = $('#studioHits');
+  const names = [...new Set(SESSIONS.map(s => s.studio))];
+  const terms = filters.q.toLowerCase().split(/\s+/).filter(Boolean);
+  let hits = [];
+  if (filters.studio !== 'all') hits = [filters.studio];
+  else if (terms.length) hits = names.filter(n => terms.every(t => n.toLowerCase().includes(t)));
+  el.innerHTML = hits.length ? `<div class="hits">🏢 ${filters.studio !== 'all' ? 'Studio page:' : 'Studios:'} ${hits.slice(0, 5).map(n => `<a class="lnk" data-studio="${esc(n)}">${esc(n)} →</a>`).join('')}</div>` : '';
 }
 
 function card(s, mode) {
@@ -329,14 +362,15 @@ function card(s, mode) {
 }
 
 function renderResults() {
+  renderStudioHits();
   const mapMode = exploreMode === 'map';
   $('#results').classList.toggle('hidden', mapMode);
   $('#mapWrap').classList.toggle('hidden', !mapMode);
   if (!loaded) { $('#results').innerHTML = '<div class="empty">Loading classes… 🐣</div>'; return; }
   const list = SESSIONS.filter(matches);
   if (mapMode) { showMap(list); return; }
-  if (!list.length) { $('#results').innerHTML = `<div class="empty">No classes match these filters.<br>Try another neighborhood or day 🌊</div>`; return; }
-  let html = '';
+  if (!list.length) { $('#results').innerHTML = `<div class="empty">No classes match${filtersActive() ? ' these filters' : ''}.<br>Try another neighborhood or day 🌊<br>${filtersActive() ? '<button class="btn ghost" style="margin-top:12px" data-clearfilters>Clear all filters</button>' : ''}</div>`; return; }
+  let html = filtersActive() ? `<div class="meta" style="margin:4px 0">${list.length} session${list.length === 1 ? '' : 's'} found · <a class="lnk" data-clearfilters>clear filters</a></div>` : '';
   DAYS.forEach(d => {
     const items = list.filter(s => s.date.getTime() === d.getTime()).sort((a, b) => timeVal(a.time) - timeVal(b.time));
     if (items.length) html += `<h2 class="day-h">${dayName(d)}</h2><div class="grid">${items.map(s => card(s)).join('')}</div>`;
@@ -903,6 +937,7 @@ async function handleClick(e) {
   if (hit('[data-login]')) { openAuth('login'); return; }
   if (hit('[data-signup]')) { openAuth('signup', '', 'parent'); return; }
   if (hit('[data-signup-studio]')) { openAuth('signup', '', 'studio'); return; }
+  if (hit('[data-clearfilters]')) { clearFilters(); return; }
   if (hit('[data-goexplore]')) { showTab('explore'); return; }
   if (hit('[data-logout]')) { await sb.auth.signOut(); profile = null; renderNav(); showTab('explore'); toast('Logged out'); return; }
   if ((el = hit('[data-authmode]'))) { openAuth(el.dataset.authmode, authState.reason); return; }

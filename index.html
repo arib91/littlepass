@@ -80,6 +80,10 @@
     font: inherit; font-weight: 700; padding: 9px 12px; border-radius: 12px;
     border: 1.5px solid var(--line); background: #fff; color: var(--ink); width: 100%;
   }
+  #searchBox { font: inherit; font-weight: 600; padding: 11px 14px; border-radius: 12px; border: 1.5px solid var(--line); background: #fff; color: var(--ink); width: 100%; }
+  #searchBox:focus, select:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
+  .hits { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; margin: 4px 0 10px; font-size: 14px; }
+  .hits .lnk { margin-right: 10px; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
   /* Class cards */
@@ -230,6 +234,20 @@
 
     <div class="filters">
       <div>
+        <div class="label">Search</div>
+        <input id="searchBox" type="search" placeholder="Search studios, classes or neighborhoods…" autocomplete="off">
+      </div>
+      <div class="row2">
+        <div>
+          <div class="label">Studio</div>
+          <select id="studioSel"></select>
+        </div>
+        <div>
+          <div class="label">Class</div>
+          <select id="classSel"></select>
+        </div>
+      </div>
+      <div>
         <div class="label">Child's age</div>
         <div class="chips" id="ageChips"></div>
       </div>
@@ -249,6 +267,7 @@
       </div>
     </div>
 
+    <div id="studioHits"></div>
     <div class="seg" id="seg"><button data-mode="list" class="on">☰ List</button><button data-mode="map">🗺️ Map</button></div>
     <div id="results"></div>
     <div id="mapWrap" class="hidden">
