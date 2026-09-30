@@ -54,6 +54,7 @@ let filters = { age: 'all', cat: 'all', hood: HOODS[0], day: 'all' };
 let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentStudio = null;
 let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
+let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
 
 // ---------- Helpers ----------
 const $ = s => document.querySelector(s);
@@ -108,9 +109,10 @@ async function loadPublic() {
   (ct.data || []).forEach(r => { counts[`${r.slot_id}_${r.session_date}`] = Number(r.taken); });
 }
 async function loadPrivate() {
-  kids = []; myBookings = []; studioBookings = []; payouts = [];
+  kids = []; myBookings = []; studioBookings = []; payouts = []; adminStudios = [];
   if (!user) { profile = null; return; }
   profile = (await sb.from('profiles').select('*').eq('id', user.id).single()).data;
+  if (profile && profile.role === 'admin') { adminStudios = (await sb.rpc('admin_list_studios')).data || []; return; }
   if (profile && profile.role === 'studio') {
     const st = studios.find(s => s.owner_id === user.id);
     if (st) {
@@ -175,9 +177,13 @@ function sessionFromBooking(b) {
 }
 
 // ---------- Header + navigation ----------
+const isAdmin = () => !!(user && profile && profile.role === 'admin');
 const isStudioUser = () => !!(user && profile && profile.role === 'studio');
 function renderNav() {
-  const items = isStudioUser()
+  const pend = adminStudios.filter(s => s.status === 'pending').length;
+  const items = isAdmin()
+    ? [['a-studios', '🏢', 'Studios' + (pend ? ` (${pend})` : '')], ['a-account', '⚙️', 'Account']]
+    : isStudioUser()
     ? [['o-overview', '📊', 'Overview'], ['o-classes', '📚', 'Classes'], ['o-bookings', '📅', 'Bookings'], ['o-earnings', '💰', 'Earnings'], ['o-account', '⚙️', 'Account']]
     : [['explore', '🔍', 'Explore'], ['bookings', '📅', 'My classes'], ['plans', '⭐', 'Plans'], ['profile', '👶', 'Family']];
   const nav = document.querySelector('nav.tabs');
@@ -185,20 +191,21 @@ function renderNav() {
   markNav();
 }
 function markNav() {
-  const key = currentView === 'owner' ? 'o-' + ownerTab : currentView;
+  const key = currentView === 'owner' ? 'o-' + ownerTab : currentView === 'admin' ? 'a-' + adminTab : currentView;
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === key));
 }
 function renderHeader() {
   const b = $('#creditBtn');
   $('#ownerBtn').classList.toggle('hidden', !!user);
   if (!user) b.textContent = 'Log in';
+  else if (isAdmin()) b.textContent = '🛡️ Admin';
   else if (isStudioUser()) { const st = myStudio(); b.textContent = '🏢 ' + (st ? st.name.slice(0, 18) : 'Studio'); }
   else b.textContent = `⭐ ${profile ? profile.credits : 0} credits`;
   renderNav();
 }
 $('#creditBtn').onclick = () => {
   if (!user) return openAuth('login');
-  showTab(isStudioUser() ? 'o-account' : 'plans');
+  showTab(isAdmin() ? 'a-account' : isStudioUser() ? 'o-account' : 'plans');
 };
 $('#ownerBtn').onclick = () => showTab('owner');
 
@@ -520,6 +527,8 @@ function renderOwner() {
     return;
   }
   ({ overview: ownerOverview, classes: ownerClasses, bookings: ownerBookingsView, earnings: ownerEarnings, account: ownerAccount }[ownerTab] || ownerOverview)(el, st);
+  if (st.status === 'pending') el.insertAdjacentHTML('afterbegin', '<div class="notice pend">⏳ <b>Your studio is waiting for approval.</b> You can set up your classes now. Parents will see them once LittlePass approves your studio.</div>');
+  if (st.status === 'rejected') el.insertAdjacentHTML('afterbegin', `<div class="notice rej">🚫 <b>Your studio isn't approved right now.</b> Parents can't see your classes.${st.status_note ? ' Reason: ' + esc(st.status_note) : ''}</div>`);
 }
 
 function sessionRoster(st) {
@@ -748,7 +757,7 @@ async function createStudio() {
   if (!name) return toast('Please enter your studio name');
   const { error } = await sb.from('studios').insert({ owner_id: user.id, name, blurb: $('#stBlurb').value.trim() || null });
   if (error) return toast(error.message.includes('duplicate') ? 'That studio name is taken' : error.message);
-  ownerTab = 'classes'; await refresh(); toast('Studio created 🎉 Now add your first class');
+  ownerTab = 'classes'; await refresh(); toast('Studio created 🎉 Add your classes while we review it');
 }
 const ov = $('#view-owner');
 ov.addEventListener('change', e => {
@@ -756,6 +765,50 @@ ov.addEventListener('change', e => {
   const c = e.target.closest('[data-cf]'); if (c) return saveClassField(c);
 });
 ov.addEventListener('input', e => { if (e.target.matches('[data-ns="price"]')) previewCredits(e.target); });
+
+// ---------- Admin ----------
+const adminCard = s => {
+  const cs = classes.filter(c => c.studio_id === s.id);
+  const tag = { pending: '<span class="tag pend">⏳ Pending</span>', approved: '<span class="tag paid">✓ Approved</span>', rejected: '<span class="tag rej">Rejected</span>' }[s.status];
+  return `<div class="panel">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap">
+      <div><b style="font-size:17px">${esc(s.name)}</b> ${tag}
+        <div class="meta">${s.owner_id ? `${esc(s.owner_name || '')} · ${esc(s.owner_email || '')}` : 'Sample partner (no owner)'} · signed up ${new Date(s.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${s.status !== 'approved' ? `<button class="btn" data-setstatus="${s.id}" data-to="approved">Approve</button>` : ''}
+        ${s.status !== 'rejected' ? `<button class="btn ghost danger" data-setstatus="${s.id}" data-to="rejected">${s.status === 'approved' ? 'Suspend' : 'Reject'}</button>` : ''}</div></div>
+    ${s.status_note ? `<div class="meta" style="margin-top:6px">Note: ${esc(s.status_note)}</div>` : ''}
+    ${s.blurb ? `<p style="margin:10px 0 0">${esc(s.blurb)}</p>` : ''}
+    <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:800;color:var(--brand-dark)">${cs.length} class${cs.length === 1 ? '' : 'es'}</summary>
+      ${cs.map(c => { const ss = slots.filter(x => x.class_id === c.id).sort((a, b) => a.dow - b.dow);
+        return `<div style="margin-top:10px"><b>${CATS[c.cat].emoji} ${esc(c.title)}</b> <span class="meta">· ${c.hood} · ${ageText(c.age_min, c.age_max)}</span>
+          ${ss.map(x => `<div class="meta">${DOW[x.dow]} ${t12(x.start_time)} · ${x.capacity} spots · ${money(x.price_cents)} → ⭐ ${x.credits}${x.active ? '' : ' (closed)'}</div>`).join('') || '<div class="meta">No time slots</div>'}</div>`; }).join('') || '<div class="meta" style="margin-top:8px">No classes yet.</div>'}</details></div>`;
+};
+function renderAdmin() {
+  const el = $('#view-admin');
+  if (!isAdmin()) { el.innerHTML = '<div class="empty">Admins only.</div>'; return; }
+  if (adminTab === 'account') {
+    el.innerHTML = `<h2 style="margin:24px 0 4px">Account</h2><div class="panel"><div class="label">Admin login</div><div class="meta" style="margin-bottom:12px">${esc(user.email)}</div><button class="btn ghost" data-logout>Log out</button></div>`;
+    return;
+  }
+  const n = st => adminStudios.filter(s => s.status === st).length;
+  const list = adminStudios.filter(s => adminFilter === 'all' || s.status === adminFilter);
+  el.innerHTML = `<h2 style="margin:24px 0 4px">Studios</h2>
+    <div class="seg" style="flex-wrap:wrap">${[['pending', `Pending (${n('pending')})`], ['approved', `Approved (${n('approved')})`], ['rejected', `Rejected (${n('rejected')})`], ['all', 'All']].map(([k, l]) => `<button data-adminf="${k}" class="${adminFilter === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    ${list.length ? list.map(adminCard).join('') : `<div class="empty">${adminFilter === 'pending' ? 'No studios waiting for approval 🎉' : 'Nothing here.'}</div>`}`;
+}
+async function setStudioStatus(id, to) {
+  const s = adminStudios.find(x => x.id === id);
+  let note = null;
+  if (to === 'rejected') {
+    note = prompt(`Why is "${s.name}" being ${s.status === 'approved' ? 'suspended' : 'rejected'}? (shown to the studio; leave empty for no reason)`);
+    if (note === null) return;
+    if (s.status === 'approved' && !confirm('Upcoming bookings at this studio will be cancelled and parents refunded. Continue?')) return;
+  }
+  const { error } = await sb.rpc('admin_set_studio_status', { p_studio: id, p_status: to, p_note: note });
+  if (error) return toast(error.message);
+  await refresh(); toast(to === 'approved' ? `✅ ${s.name} approved` : `${s.name} ${s.status === 'approved' ? 'suspended' : 'rejected'}`);
+}
 
 // ---------- Clicks ----------
 async function handleClick(e) {
@@ -774,6 +827,8 @@ async function handleClick(e) {
   if (hit('[data-authgo]')) { authGo(); return; }
   if (hit('[data-forgot]')) { forgotPassword(); return; }
   if (hit('[data-setpass]')) { setNewPassword(); return; }
+  if ((el = hit('[data-setstatus]'))) { setStudioStatus(el.dataset.setstatus, el.dataset.to); return; }
+  if ((el = hit('[data-adminf]'))) { adminFilter = el.dataset.adminf; renderAdmin(); return; }
   if (hit('[data-createstudio]')) { createStudio(); return; }
   if (hit('[data-createclass]')) { createClass(); return; }
   if (hit('[data-savestudio]')) { saveStudio(); return; }
@@ -796,7 +851,7 @@ async function handleClick(e) {
   if ((el = hit('[data-book]'))) {
     if (map) map.closePopup();
     if (!user) return openAuth('login', 'Log in or sign up to book classes. New accounts start with 10 free credits.');
-    if (profile && profile.role === 'studio') return toast('Studio accounts can\'t book classes. Use a parent account.');
+    if (profile && profile.role !== 'parent') return toast('Only parent accounts can book classes.');
     const s = SESSIONS.find(x => x.id === el.dataset.book), credits = profile ? profile.credits : 0, enough = credits >= s.credits;
     const late = new Date(`${s.dateStr}T${s.time24}`) - Date.now() < cancelHours * 36e5;
     openModal(`
@@ -839,20 +894,23 @@ async function handleClick(e) {
 document.body.addEventListener('click', handleClick);
 
 // ---------- Tabs ----------
-const VIEWS = ['explore', 'bookings', 'plans', 'profile', 'studio', 'owner'];
+const VIEWS = ['explore', 'bookings', 'plans', 'profile', 'studio', 'owner', 'admin'];
 function showTab(name) {
   let view = name;
-  if (name.startsWith('o-')) { ownerTab = name.slice(2); view = 'owner'; }
+  if (name.startsWith('a-')) { adminTab = name.slice(2); view = 'admin'; }
+  else if (name.startsWith('o-')) { ownerTab = name.slice(2); view = 'owner'; }
   else if (name === 'owner' && isStudioUser()) ownerTab = 'overview';
   currentView = view;
   VIEWS.forEach(t => $('#view-' + t).classList.toggle('hidden', t !== view));
   markNav();
-  if (!['studio', 'owner'].includes(view)) lastTab = view;
+  if (!['studio', 'owner', 'admin'].includes(view)) lastTab = view;
+  else if (view === 'admin') lastTab = name;
   else if (view === 'owner') lastTab = name.startsWith('o-') ? name : 'owner';
   if (view === 'bookings') renderBookings();
   if (view === 'plans') renderPlans();
   if (view === 'profile') renderProfile();
   if (view === 'owner') renderOwner();
+  if (view === 'admin') renderAdmin();
   window.scrollTo(0, 0);
 }
 document.querySelector('nav.tabs').onclick = e => { const b = e.target.closest('[data-tab]'); if (b) showTab(b.dataset.tab); };
@@ -861,6 +919,7 @@ function renderAll() {
   renderHeader(); renderFilters(); renderResults(); renderBookings(); renderPlans(); renderProfile();
   if (!$('#view-studio').classList.contains('hidden')) renderStudio();
   if (!$('#view-owner').classList.contains('hidden')) renderOwner();
+  if (!$('#view-admin').classList.contains('hidden')) renderAdmin();
 }
 
 // ---------- Start ----------
@@ -878,8 +937,9 @@ renderAll();
     lastUid = uid;
     setTimeout(async () => {
       await loadPrivate(); buildSessions(); renderAll();
+      if (isAdmin() && !['admin', 'studio'].includes(currentView)) showTab('a-studios');
       if (isStudioUser() && !['owner', 'studio'].includes(currentView)) showTab('o-overview');
-      if (!user && currentView === 'owner') showTab('explore');
+      if (!user && ['owner', 'admin'].includes(currentView)) showTab('explore');
     }, 0);
   });
 })();

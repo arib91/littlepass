@@ -202,6 +202,10 @@
   .sess:last-child { border-bottom: 0; }
   .tag.paid { background: #e2f4e3; color: #2d6a31; }
   .tag.pend { background: #fff1cc; color: #8a6100; }
+  .tag.rej { background: #fde4e0; color: #a5281b; }
+  .notice { border-radius: 14px; padding: 12px 14px; margin-top: 16px; font-size: 14px; line-height: 1.45; }
+  .notice.pend { background: #fff1cc; color: #6b4e00; }
+  .notice.rej { background: #fde4e0; color: #8a2016; }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -259,6 +263,7 @@
 
   <!-- OWNER -->
   <section id="view-owner" class="hidden"></section>
+  <section id="view-admin" class="hidden"></section>
 
   <!-- BOOKINGS -->
   <section id="view-bookings" class="hidden">
