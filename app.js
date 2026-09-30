@@ -55,7 +55,8 @@ let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentS
 let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
-let adminPay = [], adminPayouts = [], adminPricing = null;
+let adminPay = [], adminPayouts = [], adminPricing = null, adminReports = [];
+let studioPhotos = [], pastBookings = [], rvClassFilter = 'all';
 
 // ---------- Helpers ----------
 const $ = s => document.querySelector(s);
@@ -95,14 +96,16 @@ $('#modalBg').onclick = e => { if (e.target.id === 'modalBg' || e.target.dataset
 
 // ---------- Data ----------
 async function loadPublic() {
-  const [st, cl, sl, rv, ct, ch] = await Promise.all([
+  const [st, cl, sl, rv, ct, ch, ph] = await Promise.all([
     sb.from('studios').select('*'),
     sb.from('classes').select('*'),
     sb.from('class_slots').select('*'),
     sb.from('reviews').select('*').order('created_at'),
     sb.rpc('booked_counts', { p_from: fmt(DAYS[0]), p_to: fmt(DAYS[6]) }),
     sb.rpc('get_cancel_hours'),
+    sb.from('studio_photos').select('*').order('created_at'),
   ]);
+  studioPhotos = ph.data || [];
   if (typeof ch.data === 'number') cancelHours = ch.data;
   if (st.error || cl.error || sl.error) throw (st.error || cl.error || sl.error);
   studios = st.data; classes = cl.data; slots = sl.data; reviews = rv.data || [];
@@ -110,12 +113,14 @@ async function loadPublic() {
   (ct.data || []).forEach(r => { counts[`${r.slot_id}_${r.session_date}`] = Number(r.taken); });
 }
 async function loadPrivate() {
-  kids = []; myBookings = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null;
+  kids = []; myBookings = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null; adminReports = []; pastBookings = [];
   if (!user) { profile = null; return; }
   profile = (await sb.from('profiles').select('*').eq('id', user.id).single()).data;
   if (profile && profile.role === 'admin') {
-    const [s, p, pr, po] = await Promise.all([sb.rpc('admin_list_studios'), sb.rpc('admin_payout_summary'),
-      sb.rpc('admin_get_pricing'), sb.from('payouts').select('*').order('created_at', { ascending: false })]);
+    const [s, p, pr, po, rp] = await Promise.all([sb.rpc('admin_list_studios'), sb.rpc('admin_payout_summary'),
+      sb.rpc('admin_get_pricing'), sb.from('payouts').select('*').order('created_at', { ascending: false }),
+      sb.from('reports').select('*').eq('resolved', false).order('created_at', { ascending: false })]);
+    adminReports = rp.data || [];
     adminStudios = s.data || []; adminPay = p.data || []; adminPricing = (pr.data || [])[0] || null; adminPayouts = po.data || [];
     return;
   }
@@ -131,9 +136,10 @@ async function loadPrivate() {
   } else {
     const [k, b] = await Promise.all([
       sb.from('kids').select('*').order('created_at'),
-      sb.from('bookings').select('*').eq('user_id', user.id).gte('session_date', todayStr),
+      sb.from('bookings').select('*').eq('user_id', user.id),
     ]);
-    kids = k.data || []; myBookings = b.data || [];
+    const mine = b.data || [];
+    kids = k.data || []; myBookings = mine.filter(x => x.session_date >= todayStr); pastBookings = mine.filter(x => x.session_date < todayStr);
   }
 }
 async function refresh() {
@@ -188,9 +194,9 @@ const isStudioUser = () => !!(user && profile && profile.role === 'studio');
 function renderNav() {
   const pend = adminStudios.filter(s => s.status === 'pending').length;
   const items = isAdmin()
-    ? [['a-studios', '🏢', 'Studios' + (pend ? ` (${pend})` : '')], ['a-payouts', '💸', 'Payouts' + (adminPayouts.some(p => p.status === 'pending') ? ' •' : '')], ['a-pricing', '🧮', 'Pricing'], ['a-account', '⚙️', 'Account']]
+    ? [['a-studios', '🏢', 'Studios' + (pend ? ` (${pend})` : '')], ['a-payouts', '💸', 'Payouts' + (adminPayouts.some(p => p.status === 'pending') ? ' •' : '')], ['a-pricing', '🧮', 'Pricing'], ['a-reports', '🚩', 'Reports' + (adminReports.length ? ` (${adminReports.length})` : '')], ['a-account', '⚙️', 'Account']]
     : isStudioUser()
-    ? [['o-overview', '📊', 'Overview'], ['o-classes', '📚', 'Classes'], ['o-bookings', '📅', 'Bookings'], ['o-earnings', '💰', 'Earnings'], ['o-account', '⚙️', 'Account']]
+    ? [['o-overview', '📊', 'Overview'], ['o-classes', '📚', 'Classes'], ['o-bookings', '📅', 'Bookings'], ['o-page', '🖼️', 'Page'], ['o-earnings', '💰', 'Earnings'], ['o-account', '⚙️', 'Account']]
     : [['explore', '🔍', 'Explore'], ['bookings', '📅', 'My classes'], ['plans', '⭐', 'Plans'], ['profile', '👶', 'Family']];
   const nav = document.querySelector('nav.tabs');
   nav.innerHTML = items.map(([id, ico, label]) => `<button data-tab="${id}"><span class="ico">${ico}</span>${label}</button>`).join('');
@@ -339,6 +345,7 @@ function renderStudioHits() {
   el.innerHTML = hits.length ? `<div class="hits">🏢 ${filters.studio !== 'all' ? 'Studio page:' : 'Studios:'} ${hits.slice(0, 5).map(n => `<a class="lnk" data-studio="${esc(n)}">${esc(n)} →</a>`).join('')}</div>` : '';
 }
 
+const classRating = id => { const rs = reviews.filter(r => r.class_id === id && !r.hidden); return rs.length ? { n: rs.length, avg: rs.reduce((t, r) => t + r.stars, 0) / rs.length } : null; };
 function card(s, mode) {
   const c = CATS[s.cat], booked = isBooked(s.id), left = s.spots;
   let action;
@@ -354,6 +361,7 @@ function card(s, mode) {
       <div class="meta"><a class="lnk" data-studio="${esc(s.studio)}">${esc(s.studio)}</a><br>📍 ${s.hood} · 🕘 ${mode === 'booking' ? dayName(s.date) + ', ' : ''}${s.time} (${s.mins} min)</div>
       <div class="tags">
         ${s.ageMax ? `<span class="tag">👶 ${ageText(s.ageMin, s.ageMax)}</span>` : ''}
+        ${(() => { const rt = s.classId && classRating(s.classId); return rt ? `<span class="tag">★ ${rt.avg.toFixed(1)} (${rt.n})</span>` : ''; })()}
         ${left <= 3 && left > 0 && mode !== 'booking' ? `<span class="tag low">Only ${left} left</span>` : ''}
       </div>
     </div>
@@ -440,16 +448,52 @@ $('#nearBtn').onclick = () => {
 const hash = t => [...t].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
 const starStr = n => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
 function showStudio(name) { currentStudio = name; renderStudio(); showTab('studio'); }
+const avgOf = (arr, f) => { const v = arr.map(f).filter(x => x != null); return v.length ? v.reduce((t, x) => t + x, 0) / v.length : null; };
+const photoUrl = p => sb.storage.from('studio-photos').getPublicUrl(p.path).data.publicUrl;
+const fmtDate = d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const starSel = (id, v) => `<select id="${id}">${[5, 4, 3, 2, 1].map(n => `<option value="${n}" ${n === v ? 'selected' : ''}>${'★'.repeat(n)}${'☆'.repeat(5 - n)}</option>`).join('')}</select>`;
+const reviewHtml = (r, st, canReport) => `<div class="review">
+  <div><b>${esc(r.author)}</b> <span class="stars">${starStr(r.stars)}</span> ${r.sample ? '<span class="tag">Sample</span>' : '<span class="tag paid">✓ Verified attendee</span>'}</div>
+  ${r.class_title ? `<div class="meta">${esc(r.class_title)}${r.created_at ? ' · ' + fmtDate(r.created_at) : ''}</div>` : ''}
+  <div style="margin-top:4px">${esc(r.body)}</div>
+  ${r.reply ? `<div class="reply"><b>Reply from ${esc(st.name)}</b><div>${esc(r.reply)}</div></div>` : ''}
+  ${canReport && r.id ? `<a class="lnk rep" data-report="review" data-id="${r.id}">Report</a>` : ''}</div>`;
+
+function reviewFormHtml(st) {
+  if (!user) return `<div class="panel"><div class="label">Been to a class here?</div><p class="meta" style="margin:0 0 10px">Log in to share your experience. You can review a class after you've attended it.</p><button class="btn" data-login>Log in</button></div>`;
+  if (!profile || profile.role !== 'parent') return '';
+  const done = [...new Set(pastBookings.filter(b => b.studio_id === st.id && b.class_id).map(b => b.class_id))].filter(id => classes.some(c => c.id === id));
+  if (!done.length) return `<div class="panel"><div class="label">Leave a review</div><p class="meta" style="margin:0">You can review a class once you've attended it. After your class, come back here to tell other parents how it went.</p></div>`;
+  const mine = id => reviews.find(r => r.user_id === user.id && r.class_id === id);
+  const m = mine(done[0]) || {};
+  return `<div class="panel"><div class="label">Leave a review</div>
+    <select id="rvClass">${done.map(id => `<option value="${id}">${esc(classes.find(c => c.id === id).title)}${mine(id) ? ' (update your review)' : ''}</option>`).join('')}</select>
+    <div class="two"><div><div class="label">Overall</div>${starSel('rvStars', m.stars || 5)}</div><div><div class="label">Instructor</div>${starSel('rvInstr', m.instructor_stars || 5)}</div></div>
+    <div class="two"><div><div class="label">Cleanliness</div>${starSel('rvClean', m.clean_stars || 5)}</div><div><div class="label">Value</div>${starSel('rvValue', m.value_stars || 5)}</div></div>
+    <textarea id="rvText" rows="3" maxlength="1000" placeholder="What did your little one think?">${esc(m.body || '')}</textarea>
+    <button class="btn" data-postreview>Post review</button></div>`;
+}
+function prefillReview() {
+  const sel = $('#rvClass'); if (!sel) return;
+  const m = reviews.find(r => r.user_id === user.id && r.class_id === sel.value) || {};
+  $('#rvStars').value = m.stars || 5; $('#rvInstr').value = m.instructor_stars || 5;
+  $('#rvClean').value = m.clean_stars || 5; $('#rvValue').value = m.value_stars || 5; $('#rvText').value = m.body || '';
+}
+$('#view-studio').addEventListener('change', e => { if (e.target.id === 'rvClass') prefillReview(); });
+
 function renderStudio() {
   const st = studioByName(currentStudio), el = $('#view-studio');
   if (!st) { el.innerHTML = '<button class="back" data-back>← Back</button><div class="empty">Studio not found</div>'; return; }
   const cs = classes.filter(c => c.studio_id === st.id);
   const cats = [...new Set(cs.map(c => c.cat))], hoods = [...new Set(cs.map(c => c.hood))];
   const h = hash(st.name), sample = st.owner_id === null;
-  const real = reviews.filter(r => r.studio_id === st.id).map(r => [r.author, r.stars, r.body]);
-  const seed = sample ? [0, 1, 2].map(i => REVIEW_POOL[(h + i * 2) % REVIEW_POOL.length]) : [];
+  const real = reviews.filter(r => r.studio_id === st.id && !r.hidden);
+  const seed = sample ? [0, 1, 2].map(i => { const x = REVIEW_POOL[(h + i * 2) % REVIEW_POOL.length]; return { author: x[0], stars: x[1], body: x[2], sample: true }; }) : [];
   const all = seed.concat(real);
-  const avg = all.length ? all.reduce((a, r) => a + r[1], 0) / all.length : 0;
+  const avg = all.length ? all.reduce((t, r) => t + r.stars, 0) / all.length : 0;
+  const reviewedClasses = cs.filter(c => real.some(r => r.class_id === c.id));
+  if (rvClassFilter !== 'all' && !reviewedClasses.some(c => c.id === rvClassFilter)) rvClassFilter = 'all';
+  const shown = rvClassFilter === 'all' ? all : real.filter(r => r.class_id === rvClassFilter);
   const list = SESSIONS.filter(s => s.studio === st.name).sort((a, b) => a.date - b.date || timeVal(a.time) - timeVal(b.time));
   let sched = '';
   DAYS.forEach(d => {
@@ -457,6 +501,8 @@ function renderStudio() {
     if (items.length) sched += `<h3 class="day-h">${dayName(d)}</h3><div class="grid">${items.map(s => card(s)).join('')}</div>`;
   });
   const c0 = CATS[cats[0]] || CATS.all;
+  const photos = studioPhotos.filter(p => p.studio_id === st.id);
+  const cat3 = [['Instructor', avgOf(real, r => r.instructor_stars)], ['Cleanliness', avgOf(real, r => r.clean_stars)], ['Value', avgOf(real, r => r.value_stars)]].filter(x => x[1] != null);
   el.innerHTML = `
     <button class="back" data-back>← Back</button>
     <div class="banner" style="background:${c0.color}">
@@ -467,26 +513,40 @@ function renderStudio() {
     </div>
     <div class="panel"><div class="label">About</div><p style="margin:0">${esc(st.blurb || 'A LittlePass partner studio.')}</p>
       <div class="tags">${cats.map(c => `<span class="tag">${CATS[c].emoji} ${CATS[c].label}</span>`).join('')}</div></div>
-    ${cats.length ? `<div class="label" style="margin-top:20px">Photos</div>
-    <div class="photos">${cats.concat(cats, cats).slice(0, 3).map(c => `<div class="photo" style="background:${CATS[c].color}">${CATS[c].emoji}</div>`).join('')}</div>
-    <div class="meta" style="margin-top:4px">Placeholder images. Real partner photos would appear here.</div>` : ''}
+    ${photos.length ? `<div class="label" style="margin-top:20px">Photos</div><div class="photos real">${photos.map(p => `<img class="photo" loading="lazy" alt="${esc(p.caption || st.name)}" src="${photoUrl(p)}" data-photo="${p.id}">`).join('')}</div>`
+      : sample && cats.length ? `<div class="label" style="margin-top:20px">Photos</div><div class="photos">${cats.concat(cats, cats).slice(0, 3).map(c => `<div class="photo" style="background:${CATS[c].color}">${CATS[c].emoji}</div>`).join('')}</div><div class="meta" style="margin-top:4px">Placeholder images for this demo partner.</div>` : ''}
     <h2 style="margin:24px 0 0">Schedule this week</h2>${sched || '<div class="empty">No classes this week</div>'}
-    <h2 style="margin:28px 0 0">Reviews</h2>
-    <div class="panel">${all.length ? all.map(r => `<div class="review"><b>${esc(r[0])}</b> <span class="stars">${starStr(r[1])}</span><div>${esc(r[2])}</div></div>`).join('') : '<p class="meta" style="margin:0">No reviews yet. Be the first!</p>'}
-      ${seed.length ? '<div class="meta" style="margin-top:8px"><i>Sample reviews for this demo partner.</i></div>' : ''}</div>
-    <div class="panel"><div class="label">Leave a review</div>
-      <select id="rvStars"><option value="5">★★★★★ Loved it</option><option value="4">★★★★☆ Great</option><option value="3">★★★☆☆ Okay</option><option value="2">★★☆☆☆ Not great</option><option value="1">★☆☆☆☆ Poor</option></select>
-      <textarea id="rvText" rows="3" placeholder="What did your little one think?"></textarea>
-      <button class="btn" data-postreview>${user ? 'Post review' : 'Log in to post a review'}</button></div>`;
+    <h2 style="margin:28px 0 8px">What parents are saying</h2>
+    ${all.length ? `<div class="panel" style="margin-top:0"><div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+        <div style="text-align:center"><div style="font-size:38px;font-weight:800;line-height:1">${avg.toFixed(1)}</div><div class="stars">${starStr(avg)}</div><div class="meta">${all.length} review${all.length > 1 ? 's' : ''}</div></div>
+        <div style="flex:1;min-width:160px">${cat3.map(([l, v]) => `<div class="catrow"><span>${l}</span><div class="fillbar" style="flex:1;margin:0 10px"><div style="width:${v / 5 * 100}%"></div></div><b>${v.toFixed(1)}</b></div>`).join('')}</div></div>
+      ${reviewedClasses.length > 1 ? `<div class="chips" style="margin-top:12px"><button class="chip ${rvClassFilter === 'all' ? 'on' : ''}" data-rvclass="all">All classes</button>${reviewedClasses.map(c => `<button class="chip ${rvClassFilter === c.id ? 'on' : ''}" data-rvclass="${c.id}">${esc(c.title)}</button>`).join('')}</div>` : ''}
+      <div style="margin-top:8px">${shown.map(r => reviewHtml(r, st, !!user && r.user_id !== user.id)).join('')}</div>
+      ${seed.length && rvClassFilter === 'all' ? '<div class="meta" style="margin-top:8px"><i>Sample reviews for this demo partner.</i></div>' : ''}</div>`
+      : '<div class="panel" style="margin-top:0"><p class="meta" style="margin:0">No reviews yet. Parents who attend a class here can leave the first one.</p></div>'}
+    ${reviewFormHtml(st)}`;
 }
 async function postReview() {
   if (!user) return openAuth('login', 'Log in to leave a review.');
-  const text = $('#rvText').value.trim(), st = studioByName(currentStudio);
-  if (!text) return toast('Please write a few words');
-  const { error } = await sb.from('reviews').insert({ studio_id: st.id, user_id: user.id,
-    author: (profile && profile.display_name) || 'Parent', stars: +$('#rvStars').value, body: text });
+  const { error } = await sb.rpc('post_review', { p_class: $('#rvClass').value, p_stars: +$('#rvStars').value, p_instructor: +$('#rvInstr').value,
+    p_clean: +$('#rvClean').value, p_value: +$('#rvValue').value, p_body: $('#rvText').value });
   if (error) return toast(error.message);
   await loadPublic(); renderStudio(); toast('Thanks for your review 💛');
+}
+function openPhoto(id) {
+  const p = studioPhotos.find(x => x.id === id); if (!p) return;
+  openModal(`<img src="${photoUrl(p)}" alt="" style="width:100%;border-radius:14px;display:block">
+    ${p.caption ? `<p style="margin:10px 0 0">${esc(p.caption)}</p>` : ''}
+    <div class="actions"><button class="btn ghost" data-close>Close</button>
+    ${isAdmin() ? `<button class="btn ghost danger" data-adminrmphoto="${p.id}">Remove photo</button>` : user ? `<button class="btn ghost" data-report="photo" data-id="${p.id}">Report</button>` : ''}</div>`);
+}
+async function doReport(kind, id) {
+  if (!user) return openAuth('login', 'Log in to report content.');
+  const reason = prompt('What\'s wrong with this? (optional)');
+  if (reason === null) return;
+  const { error } = await sb.rpc('report_content', { p_kind: kind, p_target: id, p_reason: reason });
+  if (error) return toast(error.message);
+  closeModal(); toast('Thanks. We\'ll take a look.');
 }
 
 // ---------- Views ----------
@@ -566,7 +626,7 @@ function renderOwner() {
       <button class="btn" data-createstudio>Create studio</button></div>`;
     return;
   }
-  ({ overview: ownerOverview, classes: ownerClasses, bookings: ownerBookingsView, earnings: ownerEarnings, account: ownerAccount }[ownerTab] || ownerOverview)(el, st);
+  ({ overview: ownerOverview, classes: ownerClasses, bookings: ownerBookingsView, page: ownerPage, earnings: ownerEarnings, account: ownerAccount }[ownerTab] || ownerOverview)(el, st);
   if (st.status === 'pending') el.insertAdjacentHTML('afterbegin', '<div class="notice pend">⏳ <b>Your studio is waiting for approval.</b> You can set up your classes now. Parents will see them once LittlePass approves your studio.</div>');
   if (st.status === 'rejected') el.insertAdjacentHTML('afterbegin', `<div class="notice rej">🚫 <b>Your studio isn't approved right now.</b> Parents can't see your classes.${st.status_note ? ' Reason: ' + esc(st.status_note) : ''}</div>`);
 }
@@ -777,6 +837,69 @@ function ownerEarnings(el, st) {
       : '<p class="meta" style="margin:0">Completed bookings will show up here.</p>'}</div>`;
 }
 
+// ----- Page: photos + reviews -----
+async function resizeToJpeg(file, maxW = 1600) {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, maxW / bmp.width), c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
+}
+function ownerPage(el, st) {
+  const photos = studioPhotos.filter(p => p.studio_id === st.id);
+  const rvs = reviews.filter(r => r.studio_id === st.id).slice().reverse();
+  el.innerHTML = `<h2 style="margin:24px 0 4px">Your page</h2>
+    <p class="meta" style="margin:0">This is what parents see on your studio page.</p>
+    <div class="panel"><h3 style="margin:0 0 10px">Photos <span class="meta">(${photos.length}/24)</span></h3>
+      ${photos.length ? `<div class="photos real">${photos.map(p => `<div class="phwrap"><img class="photo" src="${photoUrl(p)}" alt=""><button class="phdel" data-delphoto="${p.id}" title="Delete photo">✕</button></div>`).join('')}</div>` : '<p class="meta">No photos yet. Add some so parents can see your space and your classes.</p>'}
+      <div class="label" style="margin-top:14px">Add a photo</div>
+      <input id="phFile" type="file" accept="image/jpeg,image/png,image/webp">
+      <input id="phCap" placeholder="Caption (optional)" maxlength="120">
+      <label class="consent"><input type="checkbox" id="phConsent"> I have permission from the parents or guardians of any children shown in this photo.</label>
+      <button class="btn" data-uploadphoto>Upload photo</button></div>
+    <h3 style="margin:22px 0 8px">What parents are saying</h3>
+    ${rvs.length ? rvs.map(r => `<div class="panel" style="margin-top:10px"><div><b>${esc(r.author)}</b> <span class="stars">${starStr(r.stars)}</span> <span class="tag paid">✓ Verified attendee</span></div>
+      <div class="meta">${esc(r.class_title || '')} · ${fmtDate(r.created_at)}${r.instructor_stars ? ` · Instructor ${r.instructor_stars}★ · Cleanliness ${r.clean_stars}★ · Value ${r.value_stars}★` : ''}</div>
+      <div style="margin:6px 0 10px">${esc(r.body)}</div>
+      <textarea data-replybox="${r.id}" rows="2" maxlength="500" placeholder="Write a public reply…">${esc(r.reply || '')}</textarea>
+      <button class="btn ghost" data-savereply="${r.id}">${r.reply ? 'Update reply' : 'Reply'}</button></div>`).join('')
+      : '<div class="panel"><p class="meta" style="margin:0">No reviews yet. Parents can review a class after they attend it.</p></div>'}`;
+}
+async function uploadPhoto() {
+  const st = myStudio(), f = $('#phFile').files[0];
+  if (!f) return toast('Choose a photo first');
+  if (!$('#phConsent').checked) return toast('Please confirm you have permission from parents');
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) return toast('Please use a JPG, PNG or WebP photo');
+  if (f.size > 25 * 1024 * 1024) return toast('That photo is too large');
+  const btn = $('[data-uploadphoto]'); btn.disabled = true; btn.textContent = 'Uploading…';
+  try {
+    const blob = await resizeToJpeg(f);
+    const path = `${st.id}/${crypto.randomUUID()}.jpg`;
+    const up = await sb.storage.from('studio-photos').upload(path, blob, { contentType: 'image/jpeg' });
+    if (up.error) throw up.error;
+    const ins = await sb.from('studio_photos').insert({ studio_id: st.id, path, caption: $('#phCap').value.trim() || null, consent: true });
+    if (ins.error) { await sb.storage.from('studio-photos').remove([path]); throw ins.error; }
+    await loadPublic(); renderOwner(); toast('Photo added 📸');
+  } catch (err) {
+    toast(err.message || "Couldn't upload that photo. Try a JPG or PNG.");
+    btn.disabled = false; btn.textContent = 'Upload photo';
+  }
+}
+async function deletePhoto(id) {
+  const p = studioPhotos.find(x => x.id === id);
+  if (!confirm('Delete this photo?')) return;
+  const { error } = await sb.from('studio_photos').delete().eq('id', id);
+  if (error) return toast(error.message);
+  await sb.storage.from('studio-photos').remove([p.path]);
+  await loadPublic(); renderOwner(); toast('Photo deleted');
+}
+async function saveReply(id) {
+  const box = document.querySelector(`[data-replybox="${id}"]`);
+  const { error } = await sb.rpc('reply_to_review', { p_review: id, p_reply: box.value });
+  if (error) return toast(error.message);
+  await loadPublic(); renderOwner(); toast('Reply saved ✓');
+}
+
 // ----- Account -----
 function ownerAccount(el, st) {
   el.innerHTML = `<h2 style="margin:24px 0 4px">Account</h2>
@@ -833,6 +956,7 @@ function renderAdmin() {
   }
   if (adminTab === 'payouts') return renderAdminPayouts(el);
   if (adminTab === 'pricing') return renderAdminPricing(el);
+  if (adminTab === 'reports') return renderAdminReports(el);
   const n = st => adminStudios.filter(s => s.status === st).length;
   const list = adminStudios.filter(s => adminFilter === 'all' || s.status === adminFilter);
   el.innerHTML = `<h2 style="margin:24px 0 4px">Studios</h2>
@@ -927,6 +1051,41 @@ async function savePricing() {
 }
 $('#view-admin').addEventListener('input', e => { if (e.target.closest('#prCv, #prMargin, #prMax')) pricingExamples(); });
 
+// ----- Admin: reports -----
+function renderAdminReports(el) {
+  const row = r => {
+    let preview = '', actions = '';
+    if (r.kind === 'review') {
+      const rv = reviews.find(x => x.id === r.target_id), st = rv && studioById(rv.studio_id);
+      preview = rv ? `<div><b>${esc(rv.author)}</b> <span class="stars">${starStr(rv.stars)}</span> on <b>${esc(rv.class_title || '')}</b> at ${esc(st ? st.name : '')}${rv.hidden ? ' <span class="tag rej">Hidden</span>' : ''}</div><div style="margin-top:4px">${esc(rv.body)}</div>` : '<div class="meta">This review no longer exists.</div>';
+      actions = rv ? `<button class="btn ghost danger" data-hidereview="${rv.id}" data-to="${rv.hidden ? 'false' : 'true'}">${rv.hidden ? 'Restore review' : 'Hide review'}</button>` : '';
+    } else {
+      const ph = studioPhotos.find(x => x.id === r.target_id), st = ph && studioById(ph.studio_id);
+      preview = ph ? `<div style="display:flex;gap:12px;align-items:center"><img src="${photoUrl(ph)}" alt="" style="width:110px;border-radius:10px"><div><b>Photo</b> at ${esc(st ? st.name : '')}<div class="meta">${esc(ph.caption || '')}</div></div></div>` : '<div class="meta">This photo no longer exists.</div>';
+      actions = ph ? `<button class="btn ghost danger" data-adminrmphoto="${ph.id}">Remove photo</button>` : '';
+    }
+    return `<div class="panel"><div class="meta" style="margin-bottom:6px">🚩 ${r.kind} reported ${fmtDate(r.created_at)}${r.reason ? ' · “' + esc(r.reason) + '”' : ''}</div>${preview}
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">${actions}<button class="btn ghost" data-dismiss="${r.id}">Dismiss</button></div></div>`;
+  };
+  el.innerHTML = `<h2 style="margin:24px 0 4px">Reports</h2><p class="meta" style="margin:0">Reviews and photos that parents flagged.</p>
+    ${adminReports.length ? adminReports.map(row).join('') : '<div class="empty">Nothing reported 🎉</div>'}`;
+}
+const resolveReports = (kind, id) => sb.from('reports').update({ resolved: true }).eq('kind', kind).eq('target_id', id);
+async function setReviewHidden(id, hidden) {
+  const { error } = await sb.from('reviews').update({ hidden }).eq('id', id);
+  if (error) return toast(error.message);
+  if (hidden) await resolveReports('review', id);
+  await refresh(); toast(hidden ? 'Review hidden' : 'Review restored');
+}
+async function adminRemovePhoto(id) {
+  const p = studioPhotos.find(x => x.id === id);
+  if (!confirm('Remove this photo for everyone?')) return;
+  const { error } = await sb.from('studio_photos').delete().eq('id', id);
+  if (error) return toast(error.message);
+  await sb.storage.from('studio-photos').remove([p.path]);
+  await resolveReports('photo', id); closeModal(); await refresh(); toast('Photo removed');
+}
+
 // ---------- Clicks ----------
 async function handleClick(e) {
   const t = e.target, hit = sel => t.closest(sel);
@@ -937,6 +1096,15 @@ async function handleClick(e) {
   if (hit('[data-login]')) { openAuth('login'); return; }
   if (hit('[data-signup]')) { openAuth('signup', '', 'parent'); return; }
   if (hit('[data-signup-studio]')) { openAuth('signup', '', 'studio'); return; }
+  if ((el = hit('[data-photo]'))) { openPhoto(el.dataset.photo); return; }
+  if ((el = hit('[data-report]'))) { doReport(el.dataset.report, el.dataset.id); return; }
+  if ((el = hit('[data-rvclass]'))) { rvClassFilter = el.dataset.rvclass; renderStudio(); return; }
+  if (hit('[data-uploadphoto]')) { uploadPhoto(); return; }
+  if ((el = hit('[data-delphoto]'))) { deletePhoto(el.dataset.delphoto); return; }
+  if ((el = hit('[data-savereply]'))) { saveReply(el.dataset.savereply); return; }
+  if ((el = hit('[data-hidereview]'))) { setReviewHidden(el.dataset.hidereview, el.dataset.to === 'true'); return; }
+  if ((el = hit('[data-adminrmphoto]'))) { adminRemovePhoto(el.dataset.adminrmphoto); return; }
+  if ((el = hit('[data-dismiss]'))) { await sb.from('reports').update({ resolved: true }).eq('id', el.dataset.dismiss); await refresh(); toast('Dismissed'); return; }
   if (hit('[data-clearfilters]')) { clearFilters(); return; }
   if (hit('[data-goexplore]')) { showTab('explore'); return; }
   if (hit('[data-logout]')) { await sb.auth.signOut(); profile = null; renderNav(); showTab('explore'); toast('Logged out'); return; }
