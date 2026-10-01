@@ -45,6 +45,10 @@ const REVIEW_POOL = [
   ['Jordan M.', 4, 'Lovely instructors and a nice mix of ages. Parking is a little tight.'],
   ['Sam K.', 5, 'We tried it as a first activity with our newborn and felt totally comfortable.'],
 ];
+const PARENT_STAYS = { stays: '👨‍👩‍👧 Parent stays', dropoff: '🚪 Drop-off', either: '👨‍👩‍👧 Parent stays or drop-off' };
+const LEVELS = { beginner: '🌱 First-timers welcome', all: '✨ All levels', advanced: '🏅 Some experience helps' };
+const classById = id => classes.find(c => c.id === id);
+const safeUrl = u => { const t = String(u || '').trim(); if (!t) return ''; const full = /^https?:\/\//i.test(t) ? t : 'https://' + t; try { const x = new URL(full); return /^https?:$/.test(x.protocol) ? x.href : ''; } catch (e) { return ''; } };
 const TERMS_VERSION = 'draft-1'; // bump when the legal text changes
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -57,7 +61,7 @@ let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
 let adminPay = [], adminPayouts = [], adminPricing = null, adminReports = [];
-let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [], locations = [], exceptions = [];
+let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [], locations = [], exceptions = [], contacts = [];
 
 // ---------- Helpers ----------
 const $ = s => document.querySelector(s);
@@ -98,7 +102,7 @@ $('#modalBg').onclick = e => { if (e.target.id === 'modalBg' || e.target.dataset
 
 // ---------- Data ----------
 async function loadPublic() {
-  const [st, cl, sl, rv, ct, ch, ph, pl, lc, ex] = await Promise.all([
+  const [st, cl, sl, rv, ct, ch, ph, pl, lc, ex, co] = await Promise.all([
     sb.from('studios').select('*'),
     sb.from('classes').select('*'),
     sb.from('class_slots').select('*'),
@@ -109,7 +113,9 @@ async function loadPublic() {
     sb.from('plans').select('*').order('sort'),
     sb.from('class_locations').select('*'),
     sb.from('slot_exceptions').select('*'),
+    sb.from('studio_contacts').select('*'),
   ]);
+  contacts = co.data || [];
   locations = lc.data || [];
   exceptions = ex.data || [];
   studioPhotos = ph.data || [];
@@ -217,7 +223,7 @@ function sessionFromBooking(b) {
   const live = SESSIONS.find(s => s.id === `${b.slot_id}_${b.session_date}`);
   if (live) return live;
   const c = classes.find(x => x.id === b.class_id), st = studioById(b.studio_id);
-  return { loc: locByClass(b.class_id), id: `${b.slot_id}_${b.session_date}`, key: b.slot_id, title: b.class_title, studio: st ? st.name : 'Studio',
+  return { loc: locByClass(b.class_id), classId: b.class_id, studioId: b.studio_id, id: `${b.slot_id}_${b.session_date}`, key: b.slot_id, title: b.class_title, studio: st ? st.name : 'Studio',
     cat: c ? c.cat : 'all', hood: c ? c.hood : 'San Diego', ageMin: 0, ageMax: 0, credits: b.credits,
     date: new Date(b.session_date + 'T00:00:00'), time: t12(b.session_time), mins: 0, spots: 1 };
 }
@@ -415,6 +421,13 @@ function renderStudioHits() {
 }
 
 const classRating = id => { const rs = reviews.filter(r => r.class_id === id && !r.hidden); return rs.length ? { n: rs.length, avg: rs.reduce((t, r) => t + r.stars, 0) / rs.length } : null; };
+// Phone, website and arrival notes: the database only returns these to parents who booked at that studio
+function contactBlock(studioId) {
+  const ct = contacts.find(x => x.studio_id === studioId);
+  if (!ct || !(ct.phone || ct.website || ct.arrival_notes)) return '';
+  const url = safeUrl(ct.website);
+  return `<div class="contact">${ct.phone ? `📞 <a class="lnk" href="tel:${esc(ct.phone)}">${esc(ct.phone)}</a>` : ''}${ct.phone && url ? ' · ' : ''}${url ? `🌐 <a class="lnk" href="${esc(url)}" target="_blank" rel="noopener">Website</a>` : ''}${ct.arrival_notes ? `<div class="meta">📝 ${esc(ct.arrival_notes)}</div>` : ''}</div>`;
+}
 function card(s, mode) {
   const c = CATS[s.cat], booked = isBooked(s.id), left = s.spots;
   let action;
@@ -432,7 +445,9 @@ function card(s, mode) {
         ${s.ageMax ? `<span class="tag">👶 ${ageText(s.ageMin, s.ageMax)}</span>` : ''}
         ${(() => { const rt = s.classId && classRating(s.classId); return rt ? `<span class="tag">★ ${rt.avg.toFixed(1)} (${rt.n})</span>` : ''; })()}
         ${left <= 3 && left > 0 && mode !== 'booking' ? `<span class="tag low">Only ${left} left</span>` : ''}
+        ${s.classId && mode !== 'booking' ? `<a class="lnk" style="font-size:13px" data-details="${s.classId}">Details</a>` : ''}
       </div>
+      ${mode === 'booking' ? contactBlock(s.studioId) : ''}
     </div>
     <div class="right"><div class="cost">⭐ ${s.credits}</div>${action}</div>
   </div>`;
@@ -512,6 +527,26 @@ $('#nearBtn').onclick = () => {
     userPos = here; showMap(SESSIONS.filter(s => matches(s)), true);
   }, () => toast("Couldn't get your location. Allow location access and try again."), { timeout: 8000 });
 };
+
+// ---------- Class details ----------
+function openDetails(classId) {
+  const c = classById(classId); if (!c) return;
+  const st = studioById(c.studio_id), cat = CATS[c.cat] || CATS.all, rt = classRating(c.id), loc = locByClass(c.id);
+  const next = SESSIONS.filter(s => s.classId === c.id).sort((a, b) => a.date - b.date || timeVal(a.time) - timeVal(b.time)).slice(0, 5);
+  openModal(`
+    <div class="emoji" style="background:${cat.color};margin-bottom:10px">${cat.emoji}</div>
+    <h2 style="margin-bottom:2px">${esc(c.title)}</h2>
+    <div class="meta"><a class="lnk" data-studio="${esc(st ? st.name : '')}">${esc(st ? st.name : '')}</a> · 📍 ${c.hood}${rt ? ` · ★ ${rt.avg.toFixed(1)} (${rt.n})` : ''}</div>
+    <div class="tags"><span class="tag">👶 ${ageText(c.age_min, c.age_max)}</span><span class="tag">${PARENT_STAYS[c.parent_stays] || ''}</span><span class="tag">${LEVELS[c.level] || ''}</span></div>
+    ${c.description ? `<p style="white-space:pre-line;margin:12px 0 6px">${esc(c.description)}</p>` : '<p class="meta" style="margin:12px 0 6px">The studio hasn\'t added a description yet.</p>'}
+    ${c.focus ? `<p style="margin:6px 0"><b>Focus:</b> ${esc(c.focus)}</p>` : ''}
+    ${c.what_to_bring ? `<p style="margin:6px 0"><b>What to bring:</b> ${esc(c.what_to_bring)}</p>` : ''}
+    ${loc ? `<p style="margin:6px 0">🧭 ${esc(loc.address)}<br>${dirLinks(loc)}</p>` : c.has_address ? '<p class="meta" style="margin:6px 0">🔒 The exact address is shared once you book.</p>' : ''}
+    <div class="label" style="margin-top:12px">Next sessions</div>
+    ${next.length ? next.map(s => `<div class="cls" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)"><div><b>${dayName(s.date)}</b><div class="meta">${s.time} · ${s.mins} min · ⭐ ${s.credits}</div></div>
+      <div style="margin-left:auto">${isBooked(s.id) ? '<span class="tag">✓ Booked</span>' : s.spots <= 0 ? '<span class="tag">Full</span>' : `<button class="btn" style="padding:6px 12px" data-book="${s.id}">Book</button>`}</div></div>`).join('') : '<p class="meta">No upcoming sessions.</p>'}
+    <div class="actions"><button class="btn ghost" data-close>Close</button></div>`);
+}
 
 // ---------- Studio pages ----------
 const hash = t => [...t].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
@@ -595,6 +630,7 @@ function renderStudio() {
     ${cs.length ? `<div class="panel"><div class="label">Where</div>${[...new Map(cs.map(c => { const l = locByClass(c.id); return [l ? 'a:' + l.address : 'h:' + c.hood + (c.has_address ? '!' : ''), { c, l }]; })).values()].map(({ c, l }) =>
       l ? `<div style="margin:4px 0">📍 ${esc(l.address)}<div class="meta">🧭 ${dirLinks(l)}</div></div>`
         : `<div style="margin:4px 0">📍 ${c.hood}${c.has_address ? '<div class="meta">🔒 Exact address shared after you book</div>' : ''}</div>`).join('')}</div>` : ''}
+    ${cs.length ? `<div class="panel"><div class="label">Classes</div>${cs.map(c => `<div style="padding:8px 0;border-top:1px solid var(--line)"><b>${esc(c.title)}</b> <span class="meta">· ${ageText(c.age_min, c.age_max)} · ${(LEVELS[c.level] || '').replace(/^\S+\s/, '')}</span>${c.description ? `<div class="meta">${esc(c.description.length > 110 ? c.description.slice(0, 110) + '…' : c.description)}</div>` : ''}<a class="lnk" style="font-size:13px" data-details="${c.id}">Details</a></div>`).join('')}</div>` : ''}
     ${photos.length ? `<div class="label" style="margin-top:20px">Photos</div><div class="photos real">${photos.map(p => `<img class="photo" loading="lazy" alt="${esc(p.caption || st.name)}" src="${photoUrl(p)}" data-photo="${p.id}">`).join('')}</div>`
       : sample && cats.length ? `<div class="label" style="margin-top:20px">Photos</div><div class="photos">${cats.concat(cats, cats).slice(0, 3).map(c => `<div class="photo" style="background:${CATS[c].color}">${CATS[c].emoji}</div>`).join('')}</div><div class="meta" style="margin-top:4px">Placeholder images for this demo partner.</div>` : ''}
     <h2 style="margin:24px 0 0">Schedule: next ${HORIZON} days</h2>${sched || '<div class="empty">No classes scheduled</div>'}
@@ -861,6 +897,11 @@ function ownerClasses(el, st) {
           return `<div class="two"><div><div class="label">Address</div><input data-lf="address" value="${esc(l ? l.address : '')}" placeholder="123 Main St, San Diego, CA" maxlength="200"></div>
           <div><div class="label">Who can see it</div><select data-lf="visibility"><option value="booked" ${!l || l.visibility === 'booked' ? 'selected' : ''}>Only parents who booked</option><option value="public" ${l && l.visibility === 'public' ? 'selected' : ''}>Everyone</option></select></div></div>
           <div class="meta" style="margin:-4px 0 10px">${!l ? 'No address yet. Add one so parents can get directions.' : l.lat != null ? '📍 Found on the map. ' + (l.visibility === 'public' ? 'Everyone sees the exact pin and directions.' : 'Others see only the neighborhood until they book.') : '⚠️ We couldn\'t place this address on the map. Check the spelling. Parents still get directions.'}</div>`; })()}
+        <div><div class="label">Description</div><textarea data-cf="description" rows="3" maxlength="600" placeholder="What happens in this class? What will your little one do?">${esc(c.description || '')}</textarea></div>
+        <div class="two"><div><div class="label">Focus</div><input data-cf="focus" maxlength="120" value="${esc(c.focus || '')}" placeholder="e.g. rhythm, listening, first words"></div>
+        <div><div class="label">What to bring</div><input data-cf="what_to_bring" maxlength="200" value="${esc(c.what_to_bring || '')}" placeholder="e.g. swim diaper, towel"></div></div>
+        <div class="two"><div><div class="label">Parent stays?</div><select data-cf="parent_stays">${Object.entries(PARENT_STAYS).map(([k, v]) => `<option value="${k}" ${c.parent_stays === k ? 'selected' : ''}>${v.replace(/^\S+\s/, '')}</option>`).join('')}</select></div>
+        <div><div class="label">Level</div><select data-cf="level">${Object.entries(LEVELS).map(([k, v]) => `<option value="${k}" ${c.level === k ? 'selected' : ''}>${v.replace(/^\S+\s/, '')}</option>`).join('')}</select></div></div>
         <div class="label" style="margin-top:4px">Time slots</div>
         ${cslots.length ? cslots.map(slotRow).join('') : '<p class="meta">No time slots yet. Add one below.</p>'}
         <details class="addsched"><summary>＋ Add time slots</summary>${scheduleForm()}<button class="btn" data-addsched="${c.id}">Add slots</button></details>
@@ -872,6 +913,11 @@ function ownerClasses(el, st) {
       <div><div class="label">Neighborhood</div><select id="ncHood">${HOODS.slice(1).map(h => `<option>${h}</option>`).join('')}</select></div></div>
       <div class="two"><div><div class="label">From age</div><select id="ncMin">${ages.map(m => ageOpt(m, 6)).join('')}</select></div>
       <div><div class="label">To age</div><select id="ncMax">${ages.map(m => ageOpt(m, 24)).join('')}</select></div></div>
+      <div class="label">Description</div><textarea id="ncDesc" rows="3" maxlength="600" placeholder="What happens in this class?"></textarea>
+      <div class="two"><div><div class="label">Focus</div><input id="ncFocus" maxlength="120" placeholder="e.g. rhythm, listening"></div>
+      <div><div class="label">What to bring</div><input id="ncBring" maxlength="200" placeholder="e.g. swim diaper, towel"></div></div>
+      <div class="two"><div><div class="label">Parent stays?</div><select id="ncStays">${Object.entries(PARENT_STAYS).map(([k, v]) => `<option value="${k}">${v.replace(/^\S+\s/, '')}</option>`).join('')}</select></div>
+      <div><div class="label">Level</div><select id="ncLevel">${Object.entries(LEVELS).map(([k, v]) => `<option value="${k}" ${k === 'all' ? 'selected' : ''}>${v.replace(/^\S+\s/, '')}</option>`).join('')}</select></div></div>
       <div class="two"><div><div class="label">Address (optional)</div><input id="ncAddr" placeholder="123 Main St, San Diego, CA" maxlength="200"></div>
       <div><div class="label">Who can see it</div><select id="ncVis"><option value="booked">Only parents who booked</option><option value="public">Everyone</option></select></div></div>
       <div class="newsched">${scheduleForm()}</div>
@@ -894,7 +940,9 @@ async function createClass() {
   if (!title) return toast('Please name the class');
   if (max < min) return toast('"To age" must be at least "From age"');
   const sch = readSchedule(box); if (!sch) return;
-  const { data: c, error } = await sb.from('classes').insert({ studio_id: st.id, title, cat: $('#ncCat').value, hood: $('#ncHood').value, age_min: min, age_max: max }).select().single();
+  const { data: c, error } = await sb.from('classes').insert({ studio_id: st.id, title, cat: $('#ncCat').value, hood: $('#ncHood').value, age_min: min, age_max: max,
+    description: $('#ncDesc').value.trim() || null, focus: $('#ncFocus').value.trim() || null, what_to_bring: $('#ncBring').value.trim() || null,
+    parent_stays: $('#ncStays').value, level: $('#ncLevel').value }).select().single();
   if (error) return toast(error.message);
   const r = await sb.from('class_slots').insert(slotRows(c.id, sch));
   if (r.error) toast(r.error.message);
@@ -953,7 +1001,8 @@ async function saveLocation(classId, fields, quiet) {
 }
 async function saveClassField(el) {
   const id = el.closest('[data-classbox]').dataset.classbox, c = classes.find(x => x.id === id), f = el.dataset.cf;
-  const v = ['age_min', 'age_max'].includes(f) ? +el.value : el.value.trim();
+  const nullable = ['description', 'focus', 'what_to_bring'].includes(f);
+  const v = ['age_min', 'age_max'].includes(f) ? +el.value : nullable ? (el.value.trim() || null) : el.value.trim();
   const patch = { [f]: v };
   if (f === 'title' && !v) { toast('Class name can\'t be empty'); return renderOwner(); }
   if ((f === 'age_min' && v > c.age_max) || (f === 'age_max' && v < c.age_min)) { toast('"To age" must be at least "From age"'); return renderOwner(); }
@@ -1108,7 +1157,22 @@ function ownerAccount(el, st) {
     <div class="panel"><div class="label">Studio name</div><input id="acName" value="${esc(st.name)}">
       <div class="label">Description</div><textarea id="acBlurb" rows="3">${esc(st.blurb || '')}</textarea>
       <button class="btn" data-savestudio>Save</button> <button class="btn ghost" data-studio="${esc(st.name)}">View public page</button></div>
+    <div class="panel"><div class="label">Contact info</div>
+      <p class="meta" style="margin:0 0 10px">Shared <b>only with parents who have booked</b> with you. It's never shown publicly.</p>
+      ${(() => { const ct = contacts.find(x => x.studio_id === st.id) || {}; return `<div class="two"><div><div class="label">Phone</div><input id="ctPhone" maxlength="30" value="${esc(ct.phone || '')}" placeholder="(619) 555-0100"></div>
+      <div><div class="label">Website</div><input id="ctWeb" maxlength="200" value="${esc(ct.website || '')}" placeholder="yourstudio.com"></div></div>
+      <div class="label">Arrival notes</div><textarea id="ctNotes" rows="2" maxlength="300" placeholder="e.g. Ring the bell at the side door. Parking is behind the building.">${esc(ct.arrival_notes || '')}</textarea>`; })()}
+      <button class="btn" data-savecontact>Save contact info</button></div>
     <div class="panel"><div class="label">Login</div><div class="meta" style="margin-bottom:12px">${esc(user.email)}</div><button class="btn ghost" data-logout>Log out</button></div>`;
+}
+async function saveContact() {
+  const st = myStudio();
+  const web = $('#ctWeb').value.trim();
+  if (web && !safeUrl(web)) return toast('Please enter a valid website, like yourstudio.com');
+  const row = { studio_id: st.id, phone: $('#ctPhone').value.trim() || null, website: web ? safeUrl(web) : null, arrival_notes: $('#ctNotes').value.trim() || null, updated_at: new Date().toISOString() };
+  const { error } = await sb.from('studio_contacts').upsert(row, { onConflict: 'studio_id' });
+  if (error) return toast(error.message);
+  await loadPublic(); renderOwner(); toast('Contact info saved ✓');
 }
 async function saveStudio() {
   const st = myStudio(), name = $('#acName').value.trim();
@@ -1317,6 +1381,7 @@ async function handleClick(e) {
     filters.day = v === 'all' || String(filters.day) === v ? 'all' : v;   // tapping the chosen day again clears it
     updateFilterBadge(); renderResults(); return;
   }
+  if ((el = hit('[data-details]'))) { openDetails(el.dataset.details); return; }
   if ((el = hit('[data-bkview]'))) { bookView = el.dataset.bkview; renderBookings(); return; }
   if ((el = hit('[data-goreview]'))) {
     showStudio(el.dataset.goreview);
@@ -1340,6 +1405,7 @@ async function handleClick(e) {
   if (hit('[data-createstudio]')) { createStudio(); return; }
   if (hit('[data-createclass]')) { createClass(); return; }
   if (hit('[data-savestudio]')) { saveStudio(); return; }
+  if (hit('[data-savecontact]')) { saveContact(); return; }
   if ((el = hit('[data-addsched]'))) { addSlots(el.dataset.addsched, el.closest('details')); return; }
   if ((el = hit('[data-rmslot]'))) { deleteSlot(el.dataset.rmslot); return; }
   if ((el = hit('[data-cancelsession]'))) { const [sid, d] = el.dataset.cancelsession.split('|'); cancelSessionUI(sid, d, +el.dataset.n || 0); return; }
@@ -1369,6 +1435,7 @@ async function handleClick(e) {
       <h2>${esc(s.title)}</h2>
       <div class="meta">${esc(s.studio)} · ${s.hood}<br>${dayName(s.date)} at ${s.time} · ${s.mins} min<br>Ages ${ageText(s.ageMin, s.ageMax)}${s.loc ? `<br>🧭 ${esc(s.loc.address)}` : ''}</div>
       ${!s.loc && s.hasAddr ? '<p class="meta" style="margin:8px 0 0">🔒 The exact address is shared with you once you book.</p>' : ''}
+      ${(() => { const cl = classById(s.classId); return cl ? `<div class="tags" style="margin:8px 0 0"><span class="tag">${PARENT_STAYS[cl.parent_stays] || ''}</span><span class="tag">${LEVELS[cl.level] || ''}</span></div>${cl.description ? `<p class="meta" style="margin:8px 0 0">${esc(cl.description.length > 160 ? cl.description.slice(0, 160) + '…' : cl.description)} <a class="lnk" data-details="${cl.id}">More</a></p>` : ''}${cl.what_to_bring ? `<p class="meta" style="margin:6px 0 0"><b>Bring:</b> ${esc(cl.what_to_bring)}</p>` : ''}` : ''; })()}
       <p><b>Cost: ⭐ ${s.credits} credits</b> · You have ${credits}</p>
       <div class="label">Who's coming?</div>
       <select id="bkWho">${kids.map(k => `<option value="${esc(k.name)}">${esc(k.name)}</option>`).join('')}<option value="">${kids.length ? 'Someone else' : 'My little one'}</option></select>

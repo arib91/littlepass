@@ -79,16 +79,19 @@ async function handle(event: string, data: Record<string, string>) {
   if (event === 'booking_created') {
     const { data: b } = await db.from('bookings').select('*').eq('id', data.booking_id).single();
     if (!b) { trace.push('booking_created: booking not found'); return; }
-    const [{ data: st }, { data: loc }, { data: pr }] = await Promise.all([
+    const [{ data: st }, { data: loc }, { data: pr }, { data: ct }] = await Promise.all([
       db.from('studios').select('name, owner_id').eq('id', b.studio_id).single(),
       b.class_id ? db.from('class_locations').select('address').eq('class_id', b.class_id).maybeSingle() : Promise.resolve({ data: null }),
       db.from('pricing_settings').select('cancel_hours').eq('id', 1).single(),
+      db.from('studio_contacts').select('phone, website, arrival_notes').eq('studio_id', b.studio_id).maybeSingle(),
     ]);
     const when = `${day(b.session_date)} at ${time12(b.session_time)}`;
+    const contact = ct && (ct.phone || ct.website || ct.arrival_notes)
+      ? `<p>${ct.phone ? `📞 ${esc(ct.phone)}<br>` : ''}${ct.website ? `🌐 <a href="${esc(ct.website)}">${esc(ct.website)}</a><br>` : ''}${ct.arrival_notes ? `📝 ${esc(ct.arrival_notes)}` : ''}</p>` : '';
     const addr = loc?.address as string | undefined;
     const maps = addr ? `<p>📍 ${esc(addr)}<br><a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}">Google Maps</a> · <a href="https://maps.apple.com/?daddr=${encodeURIComponent(addr)}">Apple Maps</a></p>` : '';
     await send(await emailOf(b.user_id), `You're booked: ${b.class_title}`, layout('You\'re booked! 🎉',
-      `<p><b>${esc(b.class_title)}</b> with ${esc(st?.name)}</p><p>🗓 ${esc(when)}<br>👶 ${esc(b.attendee_name)}<br>⭐ ${b.credits} credits</p>${maps}<p style="color:#7a7483">Free cancellation up to ${pr?.cancel_hours ?? 24} hours before the class starts.</p>`,
+      `<p><b>${esc(b.class_title)}</b> with ${esc(st?.name)}</p><p>🗓 ${esc(when)}<br>👶 ${esc(b.attendee_name)}<br>⭐ ${b.credits} credits</p>${maps}${contact}<p style="color:#7a7483">Free cancellation up to ${pr?.cancel_hours ?? 24} hours before the class starts.</p>`,
       { label: 'See my classes', url: SITE }));
     await send(await emailOf(st?.owner_id), `New booking: ${b.class_title}`, layout('New booking 🙌',
       `<p><b>${esc(b.attendee_name)}</b> (parent: ${esc(b.parent_name)}) booked <b>${esc(b.class_title)}</b>.</p><p>🗓 ${esc(when)}</p>`,
