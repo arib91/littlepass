@@ -33,9 +33,9 @@ const COORDS = {
   'Chula Vista': [32.6401, -117.0842], 'Del Mar': [32.9595, -117.2653],
 };
 const PLANS = [
-  { id: 'sprout', name: 'Sprout', price: 49,  credits: 12, perks: ['About 3 classes / month', 'Book 7 days ahead', 'Free cancellation up to 24h before'] },
-  { id: 'bloom',  name: 'Bloom',  price: 89,  credits: 25, perks: ['About 6 classes / month', 'Book 14 days ahead', 'Bring a sibling for +2 credits'], pop: true },
-  { id: 'grove',  name: 'Grove',  price: 149, credits: 45, perks: ['About 11 classes / month', 'Priority waitlist', 'Unused credits roll over'] },
+  { id: 'sprout', name: 'Sprout', price: 49,  credits: 12, perks: ['About 3 classes a month', 'Free cancellation up to 24h before', 'Unused credits roll over'] },
+  { id: 'bloom',  name: 'Bloom',  price: 89,  credits: 25, perks: ['About 6 classes a month', 'Free cancellation up to 24h before', 'Unused credits roll over'], pop: true },
+  { id: 'grove',  name: 'Grove',  price: 149, credits: 45, perks: ['About 11 classes a month', 'Free cancellation up to 24h before', 'Unused credits roll over'] },
 ];
 const REVIEW_POOL = [
   ['Maya R.', 5, 'My daughter looks forward to this every week. The teachers are so patient and kind.'],
@@ -56,7 +56,7 @@ let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
 let adminPay = [], adminPayouts = [], adminPricing = null, adminReports = [];
-let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming';
+let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [];
 
 // ---------- Helpers ----------
 const $ = s => document.querySelector(s);
@@ -96,7 +96,7 @@ $('#modalBg').onclick = e => { if (e.target.id === 'modalBg' || e.target.dataset
 
 // ---------- Data ----------
 async function loadPublic() {
-  const [st, cl, sl, rv, ct, ch, ph] = await Promise.all([
+  const [st, cl, sl, rv, ct, ch, ph, pl] = await Promise.all([
     sb.from('studios').select('*'),
     sb.from('classes').select('*'),
     sb.from('class_slots').select('*'),
@@ -104,8 +104,10 @@ async function loadPublic() {
     sb.rpc('booked_counts', { p_from: fmt(DAYS[0]), p_to: fmt(DAYS[6]) }),
     sb.rpc('get_cancel_hours'),
     sb.from('studio_photos').select('*').order('created_at'),
+    sb.from('plans').select('*').order('sort'),
   ]);
   studioPhotos = ph.data || [];
+  plansDb = pl.data || [];
   if (typeof ch.data === 'number') cancelHours = ch.data;
   if (st.error || cl.error || sl.error) throw (st.error || cl.error || sl.error);
   studios = st.data; classes = cl.data; slots = sl.data; reviews = rv.data || [];
@@ -187,6 +189,11 @@ function sessionFromBooking(b) {
     cat: c ? c.cat : 'all', hood: c ? c.hood : 'San Diego', ageMin: 0, ageMax: 0, credits: b.credits,
     date: new Date(b.session_date + 'T00:00:00'), time: t12(b.session_time), mins: 0, spots: 1 };
 }
+
+// Plans come from the database; the built-in list is only a fallback before it loads
+const planList = () => plansDb.length
+  ? plansDb.filter(p => p.active).map(p => ({ id: p.id, name: p.name, price: p.price_cents / 100, credits: p.credits, perks: p.perks, pop: p.popular, ready: !!p.stripe_price_id }))
+  : PLANS.map(p => ({ ...p, ready: false }));
 
 // ---------- Header + navigation ----------
 const isAdmin = () => !!(user && profile && profile.role === 'admin');
@@ -581,17 +588,65 @@ function renderBookings() {
     ? `<div class="grid">${list.map(s => card(s, 'booking')).join('')}</div>`
     : `<div class="empty">No upcoming classes.<br><button class="btn" style="margin-top:12px" data-goexplore>Find a class</button></div>`);
 }
+const subActive = () => !!(profile && ['active', 'trialing', 'past_due'].includes(profile.plan_status));
 function renderPlans() {
-  const cur = p => profile && profile.plan === p.id && profile.plan_started_at && Date.now() - new Date(profile.plan_started_at) < 30 * 864e5;
-  $('#planList').innerHTML = PLANS.map(p => `
-    <div class="plan ${p.pop ? 'pop' : ''}">
+  let banner = '';
+  if (subActive()) {
+    const end = profile.plan_period_end ? fmtDate(profile.plan_period_end) : '';
+    banner = `<div class="notice ${profile.plan_status === 'past_due' ? 'rej' : 'pend'}" style="grid-column:1/-1;margin:0;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap">
+      <div>${profile.plan_status === 'past_due' ? '⚠️ <b>Your last payment failed.</b> Please update your card to keep your credits coming.'
+        : profile.cancel_at_period_end ? `Your plan <b>cancels on ${end}</b>. Unused credits expire then.` : `✅ Your plan renews on <b>${end}</b>. Unused credits roll over, up to double your monthly credits.`}</div>
+      <button class="btn" data-manage>Manage subscription</button></div>`;
+  }
+  const isParent = !user || (profile && profile.role === 'parent');
+  $('#planList').innerHTML = banner + planList().map(p => {
+    const cur = subActive() && profile.plan === p.id;
+    let btn = '';
+    if (!isParent) btn = '';
+    else if (cur) btn = `<button class="btn ghost" disabled>✓ Current plan</button>`;
+    else if (subActive()) btn = `<button class="btn ghost" data-manage>Change plan</button>`;
+    else if (!p.ready) btn = `<button class="btn ghost" disabled>Coming soon</button>`;
+    else btn = `<button class="btn" data-plan="${p.id}">${user ? 'Subscribe' : 'Log in to subscribe'}</button>`;
+    return `<div class="plan ${p.pop ? 'pop' : ''}">
       ${p.pop ? '<div class="badge">Most popular</div>' : ''}
-      <h3>${p.name}</h3>
+      <h3>${esc(p.name)}</h3>
       <div class="price">$${p.price}<small>/month</small></div>
       <div class="meta">⭐ ${p.credits} credits every month</div>
-      <ul>${p.perks.map(x => `<li>${x}</li>`).join('')}</ul>
-      ${cur(p) ? `<button class="btn ghost" disabled>✓ Current plan</button>` : `<button class="btn" data-plan="${p.id}">Choose ${p.name}</button>`}
-    </div>`).join('');
+      <ul>${p.perks.map(x => `<li>${esc(x)}</li>`).join('')}</ul>${btn}</div>`;
+  }).join('');
+}
+async function callFunction(name, body) {
+  const { data, error } = await sb.functions.invoke(name, { body });
+  if (error) {
+    let msg = error.message;
+    try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) {}
+    throw new Error(msg);
+  }
+  return data;
+}
+async function startCheckout(planId) {
+  if (!user) return openAuth('login', 'Log in or sign up to subscribe.');
+  toast('Opening secure checkout…');
+  try { const d = await callFunction('create-checkout', { plan: planId }); location.href = d.url; }
+  catch (e) { toast(e.message); }
+}
+async function openPortal() {
+  toast('Opening your subscription…');
+  try { const d = await callFunction('billing-portal', {}); location.href = d.url; }
+  catch (e) { toast(e.message); }
+}
+async function afterCheckout(result) {
+  showTab('plans');
+  if (result === 'cancel') return toast('Checkout cancelled. No charge was made.');
+  if (result === 'portal') return;
+  toast('Payment received! Adding your credits…');
+  for (let i = 0; i < 12; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    if (!user) continue;
+    await loadPrivate(); renderAll();
+    if (profile && profile.plan_status === 'active' && profile.credits > 0) { toast(`🎉 You're subscribed! ⭐ ${profile.credits} credits added.`); return; }
+  }
+  toast('Still processing. Your credits will appear in a minute.');
 }
 function renderProfile() {
   const el = $('#view-profile');
@@ -1062,7 +1117,7 @@ function renderAdminPricing(el) {
       <div class="label">What parents would pay</div><div class="stats" id="prEx" style="margin:0 0 14px"></div>
       <button class="btn" data-savepricing>Save and recalculate all classes</button></div>
     <h3 style="margin:22px 0 8px">What a credit really earns you</h3>
-    <div class="panel" style="margin-top:0">${PLANS.map(p => `<div class="sess"><div><b>${p.name}</b> · $${p.price}/month for ${p.credits} credits</div><b>$${(p.price / p.credits).toFixed(2)} per credit</b></div>`).join('')}
+    <div class="panel" style="margin-top:0">${planList().map(p => `<div class="sess"><div><b>${p.name}</b> · $${p.price}/month for ${p.credits} credits</div><b>$${(p.price / p.credits).toFixed(2)} per credit</b></div>`).join('')}
       <div class="meta" style="margin-top:8px">Set <b>credit value</b> at or below your lowest figure here, or you'll give away more margin than you intend when parents buy the big plan. Unused credits are extra profit for you.</div></div>`;
   pricingExamples();
 }
@@ -1202,13 +1257,8 @@ async function handleClick(e) {
     await refresh(); toast(`Cancelled. ⭐ ${s.credits} credits refunded`); return;
   }
   if (hit('[data-goplans]')) { closeModal(); showTab('plans'); return; }
-  if ((el = hit('[data-plan]'))) {
-    if (!user) return openAuth('login', 'Log in or sign up to choose a plan.');
-    const p = PLANS.find(x => x.id === el.dataset.plan);
-    const { error } = await sb.rpc('demo_choose_plan', { p_plan: p.id });
-    if (error) return toast(error.message);
-    await refresh(); toast(`You're on the ${p.name} plan! (demo, no charge)`);
-  }
+  if ((el = hit('[data-plan]'))) { startCheckout(el.dataset.plan); return; }
+  if (hit('[data-manage]')) { openPortal(); return; }
 }
 document.body.addEventListener('click', handleClick);
 
@@ -1247,6 +1297,8 @@ renderAll();
   try { await loadPublic(); }
   catch (err) { $('#results').innerHTML = `<div class="empty">Couldn't load classes. Please refresh.<br><small>${esc(err.message || err)}</small></div>`; return; }
   loaded = true; buildSessions(); renderAll();
+  const co = new URLSearchParams(location.search).get('checkout');
+  if (co) { history.replaceState(null, '', location.pathname); afterCheckout(co); }
   // Fires once right away with the saved session, then on every login/logout
   sb.auth.onAuthStateChange((event, session) => {
     if (event === 'PASSWORD_RECOVERY') setTimeout(openNewPassword, 0);
