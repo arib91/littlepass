@@ -733,6 +733,78 @@ function renderPlans() {
       <ul>${p.perks.map(x => `<li>${esc(x)}</li>`).join('')}</ul>${btn}</div>`;
   }).join('');
 }
+// ---------- Your data: download everything, or delete the account ----------
+function yourDataPanel() {
+  const canDelete = profile && profile.role !== 'admin';
+  return `<div class="panel"><div class="label">Your data</div>
+    <p class="meta" style="margin:0 0 10px">You own your information. Download a copy any time${canDelete ? ', or delete your account' : ''}.</p>
+    <button class="btn ghost" data-downloaddata>⬇️ Download my data</button>
+    ${canDelete ? ' <button class="btn ghost danger" data-opendelete>Delete my account</button>' : ''}</div>`;
+}
+async function downloadMyData() {
+  toast('Preparing your data…');
+  const out = { exported_at: new Date().toISOString(), email: user.email, account_created: user.created_at };
+  const q = async (key, promise) => { const { data, error } = await promise; out[key] = error ? { error: error.message } : data; return data; };
+  await q('profile', sb.from('profiles').select('*').eq('id', user.id));
+  if (profile && profile.role === 'studio') {
+    const st = await q('studio', sb.from('studios').select('*').eq('owner_id', user.id));
+    const sid = st && st[0] && st[0].id;
+    if (sid) {
+      const cls = await q('classes', sb.from('classes').select('*').eq('studio_id', sid));
+      const ids = (cls || []).map(c => c.id);
+      if (ids.length) {
+        await q('time_slots', sb.from('class_slots').select('*').in('class_id', ids));
+        await q('class_addresses', sb.from('class_locations').select('*').in('class_id', ids));
+      }
+      await q('contact_info', sb.from('studio_contacts').select('*').eq('studio_id', sid));
+      await q('photos', sb.from('studio_photos').select('*').eq('studio_id', sid));
+      await q('bookings_received', sb.from('bookings').select('*').eq('studio_id', sid));
+      await q('payouts', sb.from('payouts').select('*').eq('studio_id', sid));
+      await q('reviews_received', sb.from('reviews').select('*').eq('studio_id', sid));
+    }
+  } else if (profile && profile.role === 'parent') {
+    await q('children', sb.from('kids').select('*'));
+    await q('bookings', sb.from('bookings').select('*').eq('user_id', user.id));
+    await q('reviews_written', sb.from('reviews').select('*').eq('user_id', user.id));
+    await q('credit_history', sb.from('credit_ledger').select('*').eq('user_id', user.id));
+  }
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob); link.download = `littlepass-my-data-${fmt(new Date())}.json`;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 4000);
+  toast('Your data was downloaded ✓');
+}
+function openDeleteAccount() {
+  const studio = profile && profile.role === 'studio';
+  openModal(`<h2>Delete your account?</h2><p style="margin:0 0 8px"><b>This can't be undone.</b></p>
+    <ul style="margin:0 0 10px;padding-left:20px;font-size:14px;line-height:1.5">
+      ${studio
+        ? `<li>Your studio, classes, time slots, photos and contact info will be removed and hidden from parents.</li>
+           <li>You can only close your account when you have <b>no upcoming bookings</b> and have been <b>paid everything you've earned</b>.</li>
+           <li>We keep anonymised booking and payout records for tax and accounting.</li>`
+        : `<li>Your <b>subscription ends immediately</b> and any unused credits${profile && profile.credits ? ` (⭐ ${profile.credits})` : ''} are lost, with no refund.</li>
+           <li>Your upcoming bookings are cancelled.</li>
+           <li>Your children's details and account information are deleted.</li>
+           <li>Reviews you wrote stay, without your name. We keep anonymised booking records for tax and accounting.</li>`}
+    </ul>
+    <p class="meta" style="margin:0 0 8px">Want a copy first? Close this and tap <b>Download my data</b>.</p>
+    <div class="label">Type DELETE to confirm</div><input id="delConfirm" autocomplete="off" autocapitalize="characters" placeholder="DELETE">
+    <div class="err" id="delErr"></div>
+    <div class="actions"><button class="btn ghost" data-close>Keep my account</button><button class="btn" style="background:#c0392b" data-confirmdelete>Delete everything</button></div>`);
+}
+async function confirmDeleteAccount() {
+  const err = $('#delErr'), btn = $('[data-confirmdelete]');
+  if ($('#delConfirm').value.trim() !== 'DELETE') { err.textContent = 'Please type DELETE (in capitals) to confirm.'; return; }
+  btn.disabled = true; btn.textContent = 'Deleting…'; err.textContent = '';
+  try { await callFunction('delete-account', { confirm: 'DELETE' }); }
+  catch (e) { err.textContent = e.message; btn.disabled = false; btn.textContent = 'Delete everything'; return; }
+  closeModal();
+  try { await sb.auth.signOut({ scope: 'local' }); } catch (e) {}
+  user = null; profile = null; kids = []; myBookings = []; studioBookings = []; pastBookings = [];
+  await loadPublic(); buildSessions(); renderAll(); showTab('explore');
+  toast('Your account was deleted. Take care! 🐣');
+}
 async function callFunction(name, body) {
   const { data, error } = await sb.functions.invoke(name, { body });
   if (error) {
@@ -779,6 +851,7 @@ function renderProfile() {
       <div><b>${esc(profile ? profile.display_name : '')}</b> · ${isStudio ? '🏢 Studio' : '👶 Parent'}</div>
       <div class="meta" style="margin-bottom:12px">${esc(user.email)}</div>
       <button class="btn ghost" data-logout>Log out</button></div>
+    ${yourDataPanel()}
     ${isStudio ? '' : `<div class="panel">
       <div class="label">Add a child</div><input id="kidName" placeholder="Name">
       <div class="label">Birthday</div><input id="kidBday" type="date">
@@ -1163,7 +1236,8 @@ function ownerAccount(el, st) {
       <div><div class="label">Website</div><input id="ctWeb" maxlength="200" value="${esc(ct.website || '')}" placeholder="yourstudio.com"></div></div>
       <div class="label">Arrival notes</div><textarea id="ctNotes" rows="2" maxlength="300" placeholder="e.g. Ring the bell at the side door. Parking is behind the building.">${esc(ct.arrival_notes || '')}</textarea>`; })()}
       <button class="btn" data-savecontact>Save contact info</button></div>
-    <div class="panel"><div class="label">Login</div><div class="meta" style="margin-bottom:12px">${esc(user.email)}</div><button class="btn ghost" data-logout>Log out</button></div>`;
+    <div class="panel"><div class="label">Login</div><div class="meta" style="margin-bottom:12px">${esc(user.email)}</div><button class="btn ghost" data-logout>Log out</button></div>
+    ${yourDataPanel()}`;
 }
 async function saveContact() {
   const st = myStudio();
@@ -1221,7 +1295,7 @@ function renderAdmin() {
   const el = $('#view-admin');
   if (!isAdmin()) { el.innerHTML = '<div class="empty">Admins only.</div>'; return; }
   if (adminTab === 'account') {
-    el.innerHTML = `<h2 style="margin:24px 0 4px">Account</h2><div class="panel"><div class="label">Admin login</div><div class="meta" style="margin-bottom:12px">${esc(user.email)}</div><button class="btn ghost" data-logout>Log out</button></div>`;
+    el.innerHTML = `<h2 style="margin:24px 0 4px">Account</h2><div class="panel"><div class="label">Admin login</div><div class="meta" style="margin-bottom:12px">${esc(user.email)}</div><button class="btn ghost" data-logout>Log out</button></div>${yourDataPanel()}`;
     return;
   }
   if (adminTab === 'payouts') return renderAdminPayouts(el);
@@ -1382,6 +1456,9 @@ async function handleClick(e) {
     updateFilterBadge(); renderResults(); return;
   }
   if ((el = hit('[data-details]'))) { openDetails(el.dataset.details); return; }
+  if (hit('[data-downloaddata]')) { downloadMyData(); return; }
+  if (hit('[data-opendelete]')) { openDeleteAccount(); return; }
+  if (hit('[data-confirmdelete]')) { confirmDeleteAccount(); return; }
   if ((el = hit('[data-bkview]'))) { bookView = el.dataset.bkview; renderBookings(); return; }
   if ((el = hit('[data-goreview]'))) {
     showStudio(el.dataset.goreview);

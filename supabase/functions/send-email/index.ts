@@ -103,7 +103,12 @@ async function handle(event: string, data: Record<string, string>) {
     const { data: st } = await db.from('studios').select('name, owner_id').eq('id', data.studio_id).single();
     const when = `${day(data.session_date)} at ${time12(data.session_time)}`;
     const parentTo = await emailOf(data.user_id);
-    if (data.by === 'parent') {
+    if (data.by === 'account_deleted') {
+      // the parent closed their account: only the studio needs to know
+      await send(await emailOf(st?.owner_id), `Booking cancelled: ${data.class_title}`, layout('A booking was cancelled',
+        `<p>A parent closed their LittlePass account, so their booking for <b>${esc(data.class_title)}</b> on ${esc(when)} was cancelled.</p><p>That spot is open again.</p>`,
+        { label: 'See your bookings', url: SITE }));
+    } else if (data.by === 'parent') {
       await send(parentTo, `Cancelled: ${data.class_title}`, layout('Your booking is cancelled',
         `<p><b>${esc(data.class_title)}</b> with ${esc(st?.name)}<br>🗓 ${esc(when)}</p><p>⭐ ${esc(data.credits)} credits are back in your account.</p>`,
         { label: 'Find another class', url: SITE }));

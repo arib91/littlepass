@@ -27,7 +27,7 @@ Anything in [BRACKETS] is a placeholder or an open decision. Nothing here has be
 11. **Data retention** periods; breach-notification process; requirement for a published data-request method.
 
 ## Product items to build once the lawyer decides
-- In-app "delete my account" and "download my data".
+- ~~In-app "delete my account" and "download my data".~~ **Built.** Deletion ends the subscription at once, cancels upcoming bookings, anonymises (does not delete) booking records and reviews, and blocks a studio from closing while it has upcoming bookings or unpaid earnings. Please review this design.
 - Record acceptance of Terms/Privacy at signup (**done in this draft**, `terms_version` + `terms_accepted_at`).
 - Marketing-email opt-in/unsubscribe (we currently send transactional email only).
 - Insurance upload / verification for studios (optional).
