@@ -133,11 +133,11 @@ on conflict (id) do nothing;
 drop policy if exists "studio uploads photos" on storage.objects;
 create policy "studio uploads photos" on storage.objects for insert to authenticated with check (
   bucket_id = 'studio-photos' and exists (select 1 from public.studios s
-    where s.owner_id = auth.uid() and s.id::text = (storage.foldername(name))[1]));
+    where s.owner_id = auth.uid() and s.id::text = (storage.foldername(objects.name))[1]));
 drop policy if exists "studio or admin deletes photos" on storage.objects;
 create policy "studio or admin deletes photos" on storage.objects for delete to authenticated using (
   bucket_id = 'studio-photos' and (public.is_admin() or exists (select 1 from public.studios s
-    where s.owner_id = auth.uid() and s.id::text = (storage.foldername(name))[1])));
+    where s.owner_id = auth.uid() and s.id::text = (storage.foldername(objects.name))[1])));
 
 revoke execute on function public.post_review(uuid, int, int, int, int, text) from public, anon;
 revoke execute on function public.reply_to_review(uuid, text) from public, anon;
