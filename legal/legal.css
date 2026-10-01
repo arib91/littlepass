@@ -1,0 +1,22 @@
+:root { --bg:#fffaf5; --card:#fff; --ink:#2d2a32; --muted:#7a7483; --line:#efe7df; --brand:#ff7a59; }
+@media (prefers-color-scheme: dark) { :root { --bg:#1f1c24; --card:#2a2631; --ink:#f3eef7; --muted:#a9a1b3; --line:#3a3542; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.65 'Nunito', system-ui, -apple-system, sans-serif; }
+.wrap { max-width: 760px; margin: 0 auto; padding: 20px 16px 80px; }
+a { color: var(--brand); }
+.top { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 0 16px; }
+.logo { font-weight:800; font-size:20px; text-decoration:none; color:var(--ink); }
+.logo span { color: var(--brand); }
+.draft { background:#fff1cc; color:#6b4e00; border-radius:14px; padding:12px 16px; font-size:14px; margin-bottom:18px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:20px; padding:24px 22px; }
+h1 { font-size:28px; margin:0 0 4px; line-height:1.2; }
+h2 { font-size:19px; margin:28px 0 6px; }
+h3 { font-size:16px; margin:18px 0 4px; }
+p, li { margin: 6px 0; }
+ul { padding-left: 22px; }
+.meta { color: var(--muted); font-size: 14px; }
+.ph { background:#fde4f0; color:#8a1f55; padding:0 4px; border-radius:4px; font-weight:700; }
+.nav a { margin-right: 14px; font-size: 14px; }
+table { border-collapse: collapse; width:100%; font-size:14px; margin: 8px 0; }
+td, th { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+th { background: rgba(255,122,89,.08); }
