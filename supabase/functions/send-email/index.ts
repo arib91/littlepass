@@ -104,6 +104,7 @@ async function handle(event: string, data: Record<string, string>) {
 }
 
 Deno.serve(async (req) => {
+  trace.length = 0;
   try {
     const { data: settings } = await db.from('email_settings').select('hook_secret').eq('id', 1).single();
     if (!settings || req.headers.get('x-hook-secret') !== settings.hook_secret) return new Response('Unauthorized', { status: 401 });
