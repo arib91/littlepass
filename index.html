@@ -263,6 +263,14 @@
   @media (max-width: 430px) { .hero { padding: 18px 16px; margin: 12px 0 0; } .hero h1 { font-size: 22px; } }
   .chiprows { display: grid; gap: 8px; margin-top: 10px; min-width: 0; }
   .chiprows .chip { padding: 6px 12px; font-size: 14px; }
+  .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+  .calcell { border: 1.5px solid var(--line); background: #fff; color: var(--ink); border-radius: 12px; padding: 5px 0 4px; display: flex; flex-direction: column; align-items: center; line-height: 1.15; min-width: 0; }
+  .calcell span { font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--muted); }
+  .calcell b { font-size: 16px; }
+  .calcell small { font-size: 11px; font-weight: 700; color: var(--brand-dark); }
+  .calcell.zero { opacity: .45; }
+  .calcell.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .calcell.on span, .calcell.on small { color: #fff; }
   .legalfoot { text-align: center; font-size: 13px; color: var(--muted); margin-top: 36px; }
   .legalfoot a { color: var(--muted); }
   .hidden { display: none !important; }
@@ -310,15 +318,13 @@
           <select id="classSel"></select>
         </div>
       </div>
-      <div class="row2">
-        <div>
-          <div class="label">Neighborhood</div>
-          <select id="hoodSel"></select>
-        </div>
-        <div>
-          <div class="label">Day</div>
-          <select id="daySel"></select>
-        </div>
+      <div>
+        <div class="label">Neighborhood</div>
+        <select id="hoodSel"></select>
+      </div>
+      <div>
+        <div class="label">Date</div>
+        <div id="dayCal"></div>
       </div>
       <div class="panelfoot"><button class="btn ghost" data-clearfilters>Clear all</button><button class="btn" id="showResults">Show results</button></div>
     </div>

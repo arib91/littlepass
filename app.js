@@ -65,7 +65,8 @@ const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const today = new Date(); today.setHours(0, 0, 0, 0);
 const todayStr = fmt(today);
-const DAYS = Array.from({ length: 7 }, (_, i) => { const d = new Date(today); d.setDate(d.getDate() + i); return d; });
+const HORIZON = 14; // days parents can see and book
+const DAYS = Array.from({ length: HORIZON }, (_, i) => { const d = new Date(today); d.setDate(d.getDate() + i); return d; });
 const dayName = d => {
   const diff = Math.round((d - today) / 864e5);
   if (diff === 0) return 'Today';
@@ -102,7 +103,7 @@ async function loadPublic() {
     sb.from('classes').select('*'),
     sb.from('class_slots').select('*'),
     sb.from('reviews').select('*').order('created_at'),
-    sb.rpc('booked_counts', { p_from: fmt(DAYS[0]), p_to: fmt(DAYS[6]) }),
+    sb.rpc('booked_counts', { p_from: fmt(DAYS[0]), p_to: fmt(DAYS[DAYS.length - 1]) }),
     sb.rpc('get_cancel_hours'),
     sb.from('studio_photos').select('*').order('created_at'),
     sb.from('plans').select('*').order('sort'),
@@ -333,9 +334,20 @@ function renderFilters() {
   $('#studioSel').innerHTML = `<option value="all">All studios</option>` + studioNames.map(n => `<option value="${esc(n)}" ${filters.studio === n ? 'selected' : ''}>${esc(n)}</option>`).join('');
   $('#classSel').innerHTML = `<option value="all">All classes</option>` + classTitles.map(n => `<option value="${esc(n)}" ${filters.cls === n ? 'selected' : ''}>${esc(n)}</option>`).join('');
   $('#hoodSel').innerHTML = HOODS.map(h => `<option ${filters.hood === h ? 'selected' : ''}>${h}</option>`).join('');
-  $('#daySel').innerHTML = `<option value="all">Next 7 days</option>` +
-    DAYS.map((d, i) => `<option value="${i}" ${filters.day == i ? 'selected' : ''}>${dayName(d)}</option>`).join('');
   updateFilterBadge();
+  renderDayCal();
+}
+// Two-week date grid. Each day shows how many classes match the OTHER filters, so you can see where to look.
+function renderDayCal() {
+  const box = $('#dayCal'); if (!box) return;
+  const counts = {};
+  SESSIONS.filter(s => matches(s, true)).forEach(s => { counts[s.dateStr] = (counts[s.dateStr] || 0) + 1; });
+  const cell = (d, i) => {
+    const n = counts[fmt(d)] || 0, on = String(filters.day) === String(i);
+    const top = i === 0 ? 'Today' : d.getDate() === 1 ? d.toLocaleDateString('en-US', { month: 'short' }) : d.toLocaleDateString('en-US', { weekday: 'short' });
+    return `<button class="calcell ${on ? 'on' : ''} ${n ? '' : 'zero'}" data-day="${i}" aria-pressed="${on}" title="${d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}: ${n} class${n === 1 ? '' : 'es'}"><span>${top}</span><b>${d.getDate()}</b><small>${n || '·'}</small></button>`;
+  };
+  box.innerHTML = `<button class="chip ${filters.day === 'all' ? 'on' : ''}" data-day="all" style="margin-bottom:8px">All ${HORIZON} days</button><div class="cal">${DAYS.map(cell).join('')}</div>`;
 }
 $('#ageChips').onclick = e => { const b = e.target.closest('[data-age]'); if (!b) return; filters.age = b.dataset.age; renderFilters(); renderResults(); };
 $('#catChips').onclick = e => { const b = e.target.closest('[data-cat]'); if (!b) return; filters.cat = b.dataset.cat; renderFilters(); renderResults(); };
@@ -344,9 +356,8 @@ $('#classSel').onchange = e => { filters.cls = e.target.value; updateFilterBadge
 let searchTimer;
 $('#searchBox').oninput = e => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { filters.q = e.target.value; renderResults(); }, 120); };
 $('#hoodSel').onchange = e => { filters.hood = e.target.value; updateFilterBadge(); renderResults(); };
-$('#daySel').onchange = e => { filters.day = e.target.value; updateFilterBadge(); renderResults(); };
 
-function matches(s) {
+function matches(s, ignoreDay) {
   let min, max;
   if (filters.age.startsWith('kid')) {
     const k = kids[+filters.age.slice(3)];
@@ -355,7 +366,7 @@ function matches(s) {
   if (!(s.ageMin <= max && s.ageMax >= min)) return false;
   if (filters.cat !== 'all' && s.cat !== filters.cat) return false;
   if (filters.hood !== HOODS[0] && s.hood !== filters.hood) return false;
-  if (filters.day !== 'all' && s.date.getTime() !== DAYS[+filters.day].getTime()) return false;
+  if (!ignoreDay && filters.day !== 'all' && s.date.getTime() !== DAYS[+filters.day].getTime()) return false;
   if (filters.studio !== 'all' && s.studio !== filters.studio) return false;
   if (filters.cls !== 'all' && s.title !== filters.cls) return false;
   const terms = filters.q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -424,12 +435,12 @@ function card(s, mode) {
 }
 
 function renderResults() {
-  renderStudioHits();
+  renderStudioHits(); renderDayCal();
   const mapMode = exploreMode === 'map';
   $('#results').classList.toggle('hidden', mapMode);
   $('#mapWrap').classList.toggle('hidden', !mapMode);
   if (!loaded) { $('#results').innerHTML = '<div class="empty">Loading classes… 🐣</div>'; return; }
-  const list = SESSIONS.filter(matches);
+  const list = SESSIONS.filter(s => matches(s));
   if (mapMode) { showMap(list); return; }
   if (!list.length) { $('#results').innerHTML = `<div class="empty">No classes match${filtersActive() ? ' these filters' : ''}.<br>Try another neighborhood or day 🌊<br>${filtersActive() ? '<button class="btn ghost" style="margin-top:12px" data-clearfilters>Clear all filters</button>' : ''}</div>`; return; }
   let html = filtersActive() ? `<div class="meta" style="margin:4px 0">${list.length} session${list.length === 1 ? '' : 's'} found · <a class="lnk" data-clearfilters>clear filters</a></div>` : '';
@@ -494,7 +505,7 @@ $('#nearBtn').onclick = () => {
   navigator.geolocation.getCurrentPosition(pos => {
     const here = [pos.coords.latitude, pos.coords.longitude];
     if (Math.min(...PARTNERS.map(p => miles(here, p.pos))) > 60) { toast("You're outside San Diego. Showing all partners."); return; }
-    userPos = here; showMap(SESSIONS.filter(matches), true);
+    userPos = here; showMap(SESSIONS.filter(s => matches(s)), true);
   }, () => toast("Couldn't get your location. Allow location access and try again."), { timeout: 8000 });
 };
 
@@ -582,7 +593,7 @@ function renderStudio() {
         : `<div style="margin:4px 0">📍 ${c.hood}${c.has_address ? '<div class="meta">🔒 Exact address shared after you book</div>' : ''}</div>`).join('')}</div>` : ''}
     ${photos.length ? `<div class="label" style="margin-top:20px">Photos</div><div class="photos real">${photos.map(p => `<img class="photo" loading="lazy" alt="${esc(p.caption || st.name)}" src="${photoUrl(p)}" data-photo="${p.id}">`).join('')}</div>`
       : sample && cats.length ? `<div class="label" style="margin-top:20px">Photos</div><div class="photos">${cats.concat(cats, cats).slice(0, 3).map(c => `<div class="photo" style="background:${CATS[c].color}">${CATS[c].emoji}</div>`).join('')}</div><div class="meta" style="margin-top:4px">Placeholder images for this demo partner.</div>` : ''}
-    <h2 style="margin:24px 0 0">Schedule this week</h2>${sched || '<div class="empty">No classes this week</div>'}
+    <h2 style="margin:24px 0 0">Schedule: next ${HORIZON} days</h2>${sched || '<div class="empty">No classes scheduled</div>'}
     <h2 style="margin:28px 0 8px">What parents are saying</h2>
     ${all.length ? `<div class="panel" style="margin-top:0"><div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
         <div style="text-align:center"><div style="font-size:38px;font-weight:800;line-height:1">${avg.toFixed(1)}</div><div class="stars">${starStr(avg)}</div><div class="meta">${all.length} review${all.length > 1 ? 's' : ''}</div></div>
@@ -777,15 +788,15 @@ function renderOwner() {
 }
 
 function sessionRoster(st) {
-  // upcoming sessions (next 7 days) with who's booked
+  // upcoming sessions (next 2 weeks) with who's booked
   return SESSIONS.filter(s => s.studioId === st.id).sort((a, b) => a.date - b.date || timeVal(a.time) - timeVal(b.time));
 }
 const bar = (n, cap) => `<div class="fillbar"><div style="width:${cap ? Math.min(100, n / cap * 100) : 0}%"></div></div>`;
 
 function ownerOverview(el, st) {
-  const S = studioStats(), sess = sessionRoster(st);
+  const S = studioStats(), sess = sessionRoster(st), week = sess.filter(s => s.date <= DAYS[6]);  // "this week" stays 7 days
   const weekBk = studioBookings.filter(b => b.session_date >= fmt(DAYS[0]) && b.session_date <= fmt(DAYS[6]));
-  const cap = sum(sess, s => s.capacity), taken = sum(sess, s => s.taken);
+  const cap = sum(week, s => s.capacity), taken = sum(week, s => s.taken);
   el.innerHTML = `<h2 style="margin:24px 0 4px">Hi, ${esc(st.name)} 👋</h2>
     <div class="stats">
       <div class="stat"><b>${weekBk.length}</b>bookings this week</div>
@@ -796,7 +807,7 @@ function ownerOverview(el, st) {
     ${sess.length ? `<div class="panel" style="margin-top:0">${sess.slice(0, 8).map(s => `<div class="sess">
         <div><b>${esc(s.title)}</b><div class="meta">${dayName(s.date)} · ${s.time} · ${s.mins} min</div></div>
         <div style="text-align:right;min-width:90px"><b>${s.taken}/${s.capacity}</b> booked${bar(s.taken, s.capacity)}</div></div>`).join('')}</div>`
-      : `<div class="panel"><p class="meta" style="margin:0">No sessions in the next 7 days. Add a class and time slots to get started.</p></div>`}
+      : `<div class="panel"><p class="meta" style="margin:0">No sessions in the next 2 weeks. Add a class and time slots to get started.</p></div>`}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
       <button class="btn" data-goto="o-classes">Manage classes</button>
       <button class="btn ghost" data-goto="o-bookings">See bookings</button>
@@ -1283,6 +1294,11 @@ async function handleClick(e) {
   if ((el = hit('[data-hidereview]'))) { setReviewHidden(el.dataset.hidereview, el.dataset.to === 'true'); return; }
   if ((el = hit('[data-adminrmphoto]'))) { adminRemovePhoto(el.dataset.adminrmphoto); return; }
   if ((el = hit('[data-dismiss]'))) { await sb.from('reports').update({ resolved: true }).eq('id', el.dataset.dismiss); await refresh(); toast('Dismissed'); return; }
+  if ((el = hit('[data-day]'))) {
+    const v = el.dataset.day;
+    filters.day = v === 'all' || String(filters.day) === v ? 'all' : v;   // tapping the chosen day again clears it
+    updateFilterBadge(); renderResults(); return;
+  }
   if ((el = hit('[data-bkview]'))) { bookView = el.dataset.bkview; renderBookings(); return; }
   if ((el = hit('[data-goreview]'))) {
     showStudio(el.dataset.goreview);
