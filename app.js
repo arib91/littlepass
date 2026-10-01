@@ -483,7 +483,17 @@ $('#nearBtn').onclick = () => {
 // ---------- Studio pages ----------
 const hash = t => [...t].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
 const starStr = n => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
-function showStudio(name) { currentStudio = name; renderStudio(); showTab('studio'); }
+function showStudio(name, fromHash) {
+  currentStudio = name; renderStudio(); showTab('studio');
+  document.title = `${name} | LittlePass`;
+  const h = '#studio/' + encodeURIComponent(name);
+  if (!fromHash && location.hash !== h) location.hash = h;   // makes the studio page a shareable link
+}
+window.addEventListener('hashchange', () => {
+  const m = location.hash.match(/^#studio\/(.+)$/);
+  if (m && loaded) { const n = decodeURIComponent(m[1]); if (studioByName(n) && n !== currentStudio) showStudio(n, true); }
+  else if (!m && currentView === 'studio') showTab(lastTab || 'explore');
+});
 const avgOf = (arr, f) => { const v = arr.map(f).filter(x => x != null); return v.length ? v.reduce((t, x) => t + x, 0) / v.length : null; };
 const photoUrl = p => sb.storage.from('studio-photos').getPublicUrl(p.path).data.publicUrl;
 const fmtDate = d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -540,7 +550,7 @@ function renderStudio() {
   const photos = studioPhotos.filter(p => p.studio_id === st.id);
   const cat3 = [['Instructor', avgOf(real, r => r.instructor_stars)], ['Cleanliness', avgOf(real, r => r.clean_stars)], ['Value', avgOf(real, r => r.value_stars)]].filter(x => x[1] != null);
   el.innerHTML = `
-    <button class="back" data-back>← Back</button>
+    <div style="display:flex;justify-content:space-between;align-items:center"><button class="back" data-back>← Back</button><button class="back" data-share>🔗 Share</button></div>
     <div class="banner" style="background:${c0.color}">
       <div class="big">${c0.emoji}</div>
       <div><h1>${esc(st.name)}</h1>
@@ -564,6 +574,13 @@ function renderStudio() {
       ${seed.length && rvClassFilter === 'all' ? '<div class="meta" style="margin-top:8px"><i>Sample reviews for this demo partner.</i></div>' : ''}</div>`
       : '<div class="panel" style="margin-top:0"><p class="meta" style="margin:0">No reviews yet. Parents who attend a class here can leave the first one.</p></div>'}
     ${reviewFormHtml(st)}`;
+}
+async function shareStudio() {
+  const url = location.href, title = `${currentStudio} on LittlePass`;
+  try {
+    if (navigator.share) { await navigator.share({ title, url }); return; }
+    await navigator.clipboard.writeText(url); toast('Link copied 🔗');
+  } catch (e) { /* share dialog dismissed */ }
 }
 async function postReview() {
   if (!user) return openAuth('login', 'Log in to leave a review.');
@@ -1233,7 +1250,8 @@ async function handleClick(e) {
   const t = e.target, hit = sel => t.closest(sel);
   let el;
   if ((el = hit('[data-studio]'))) { if (map) map.closePopup(); showStudio(el.dataset.studio); return; }
-  if (hit('[data-back]')) { showTab(lastTab); return; }
+  if (hit('[data-back]')) { if (location.hash.startsWith('#studio/')) location.hash = ''; else showTab(lastTab); return; }
+  if (hit('[data-share]')) { shareStudio(); return; }
   if (hit('[data-postreview]')) { postReview(); return; }
   if (hit('[data-login]')) { openAuth('login'); return; }
   if (hit('[data-signup]')) { openAuth('signup', '', 'parent'); return; }
@@ -1337,6 +1355,7 @@ function showTab(name) {
   currentView = view;
   VIEWS.forEach(t => $('#view-' + t).classList.toggle('hidden', t !== view));
   markNav();
+  if (view !== 'studio') document.title = 'LittlePass San Diego | Baby & toddler classes';
   if (!['studio', 'owner', 'admin'].includes(view)) lastTab = view;
   else if (view === 'admin') lastTab = name;
   else if (view === 'owner') lastTab = name.startsWith('o-') ? name : 'owner';
@@ -1362,6 +1381,7 @@ renderAll();
   try { await loadPublic(); }
   catch (err) { $('#results').innerHTML = `<div class="empty">Couldn't load classes. Please refresh.<br><small>${esc(err.message || err)}</small></div>`; return; }
   loaded = true; buildSessions(); renderAll();
+  { const m = location.hash.match(/^#studio\/(.+)$/); if (m && studioByName(decodeURIComponent(m[1]))) showStudio(decodeURIComponent(m[1]), true); }
   const co = new URLSearchParams(location.search).get('checkout');
   if (co) { history.replaceState(null, '', location.pathname); afterCheckout(co); }
   // Fires once right away with the saved session, then on every login/logout

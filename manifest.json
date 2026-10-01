@@ -1,0 +1,10 @@
+{
+  "name": "LittlePass San Diego",
+  "short_name": "LittlePass",
+  "description": "Baby and toddler classes across San Diego, with one membership.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fffaf5",
+  "theme_color": "#ff7a59",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
