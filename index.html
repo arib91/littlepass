@@ -13,9 +13,13 @@
 <meta property="og:url" content="https://littlepass.netlify.app/">
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="icon.svg">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="LittlePass">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="mobile-web-app-capable" content="yes">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
@@ -234,6 +238,21 @@
   .consent { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; margin: 0 0 12px; }
   .consent input { width: auto; margin: 3px 0 0; }
   .panel input[type=file] { padding: 8px; background: #fbf7f2; }
+  #installTip { position: fixed; left: 12px; right: 12px; bottom: 84px; z-index: 12; background: var(--ink); color: #fff; border-radius: 16px; padding: 12px 14px; font-size: 14px; line-height: 1.4; display: none; gap: 12px; align-items: center; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+  #installTip.show { display: flex; }
+  #installTip img { width: 40px; height: 40px; border-radius: 10px; flex: none; }
+  #installTip button { background: none; border: 0; color: #fff; font-size: 22px; line-height: 1; padding: 4px 8px; margin-left: auto; opacity: .8; }
+  .logo { display: block; white-space: nowrap; flex: none; }  /* one text run, so "Little" and "Pass" stay together */
+  @media (max-width: 430px) {
+    .bar { gap: 8px; padding: 10px 12px; }
+    .logo { font-size: 19px; }
+    .ownerbtn { padding: 6px 9px; font-size: 12px; }
+    .credits { padding: 7px 11px; font-size: 14px; }
+  }
+  /* grid children may shrink below their content, so the scrolling chip rows can't widen the page */
+  .filters > *, .row2 > *, .two > * { min-width: 0; }
+  .chips { max-width: 100%; }
+  html, body { overflow-x: hidden; }
   .legalfoot { text-align: center; font-size: 13px; color: var(--muted); margin-top: 36px; }
   .legalfoot a { color: var(--muted); }
   .hidden { display: none !important; }
@@ -337,6 +356,7 @@
 
 <div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
+<div id="installTip" role="note"><img src="icon-180.png" alt=""><span><b>Add LittlePass to your home screen.</b> Tap the Share button, then <b>Add to Home Screen</b>.</span><button id="installClose" aria-label="Dismiss">×</button></div>
 
 <script src="app.js"></script>
 </body>

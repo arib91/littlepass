@@ -1375,6 +1375,18 @@ function renderAll() {
   if (!$('#view-admin').classList.contains('hidden')) renderAdmin();
 }
 
+// ---------- iPhone: "Add to Home Screen" tip ----------
+// iPhones can't show an install prompt, so we explain it once. Hidden when already installed or dismissed.
+function maybeShowInstallTip() {
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const installed = navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+  let seen = false; try { seen = !!localStorage.getItem('lp-install-tip'); } catch (e) {}
+  if (!ios || installed || seen) return;
+  setTimeout(() => { if (currentView === 'explore') $('#installTip').classList.add('show'); }, 6000);
+}
+$('#installClose').onclick = () => { $('#installTip').classList.remove('show'); try { localStorage.setItem('lp-install-tip', '1'); } catch (e) {} };
+maybeShowInstallTip();
+
 // ---------- Start ----------
 renderAll();
 (async () => {
