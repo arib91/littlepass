@@ -90,8 +90,10 @@ async function handle(event: string, data: Record<string, string>) {
       ? `<p>${ct.phone ? `📞 ${esc(ct.phone)}<br>` : ''}${ct.website ? `🌐 <a href="${esc(ct.website)}">${esc(ct.website)}</a><br>` : ''}${ct.arrival_notes ? `📝 ${esc(ct.arrival_notes)}` : ''}</p>` : '';
     const addr = loc?.address as string | undefined;
     const maps = addr ? `<p>📍 ${esc(addr)}<br><a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}">Google Maps</a> · <a href="https://maps.apple.com/?daddr=${encodeURIComponent(addr)}">Apple Maps</a></p>` : '';
-    await send(await emailOf(b.user_id), `You're booked: ${b.class_title}`, layout('You\'re booked! 🎉',
-      `<p><b>${esc(b.class_title)}</b> with ${esc(st?.name)}</p><p>🗓 ${esc(when)}<br>👶 ${esc(b.attendee_name)}<br>⭐ ${b.credits} credits</p>${maps}${contact}<p style="color:#7a7483">Free cancellation up to ${pr?.cancel_hours ?? 24} hours before the class starts.</p>`,
+    const fromWaitlist = b.source === 'waitlist';
+    await send(await emailOf(b.user_id), fromWaitlist ? `A spot opened up! You're booked: ${b.class_title}` : `You're booked: ${b.class_title}`,
+      layout(fromWaitlist ? 'You\'re off the waitlist! 🎉' : 'You\'re booked! 🎉',
+      `${fromWaitlist ? '<p>A spot opened up, so we booked it for you automatically.</p>' : ''}<p><b>${esc(b.class_title)}</b> with ${esc(st?.name)}</p><p>🗓 ${esc(when)}<br>👶 ${esc(b.attendee_name)}<br>⭐ ${b.credits} credits</p>${maps}${contact}<p style="color:#7a7483">${fromWaitlist ? 'Can\'t make it anymore? ' : ''}Free cancellation up to ${pr?.cancel_hours ?? 24} hours before the class starts.</p>`,
       { label: 'See my classes', url: SITE }));
     await send(await emailOf(st?.owner_id), `New booking: ${b.class_title}`, layout('New booking 🙌',
       `<p><b>${esc(b.attendee_name)}</b> (parent: ${esc(b.parent_name)}) booked <b>${esc(b.class_title)}</b>.</p><p>🗓 ${esc(when)}</p>`,
@@ -121,6 +123,44 @@ async function handle(event: string, data: Record<string, string>) {
         `<p>We're sorry: <b>${esc(data.class_title)}</b> with ${esc(st?.name)} on ${esc(when)} has been cancelled.</p>${why}<p>⭐ ${esc(data.credits)} credits have been returned to your account, so you can book something else.</p>`,
         { label: 'Find another class', url: SITE }));
     }
+  }
+
+  if (event === 'class_reminder') {
+    // one email per parent with all of tomorrow's classes
+    const ids = data.booking_ids as unknown as string[];
+    const { data: bs } = await db.from('bookings').select('*').in('id', ids ?? []).order('session_time');
+    if (!bs || !bs.length) { trace.push('class_reminder: no bookings left'); return; }
+    const studioIds = [...new Set(bs.map((b) => b.studio_id))], classIds = [...new Set(bs.map((b) => b.class_id).filter(Boolean))];
+    const [{ data: sts }, { data: locs }, { data: cts }, { data: cls }] = await Promise.all([
+      db.from('studios').select('id, name').in('id', studioIds),
+      db.from('class_locations').select('class_id, address').in('class_id', classIds),
+      db.from('studio_contacts').select('studio_id, phone, arrival_notes').in('studio_id', studioIds),
+      db.from('classes').select('id, what_to_bring').in('id', classIds),
+    ]);
+    // siblings in the same class share one entry
+    const groups = new Map<string, typeof bs>();
+    bs.forEach((b) => { const k = `${b.slot_id}_${b.session_date}`; groups.set(k, [...(groups.get(k) ?? []), b]); });
+    const items = [...groups.values()].map((g) => {
+      const b = g[0];
+      const st = sts?.find((s) => s.id === b.studio_id), ct = cts?.find((c) => c.studio_id === b.studio_id);
+      const addr = locs?.find((l) => l.class_id === b.class_id)?.address as string | undefined;
+      const bring = cls?.find((c) => c.id === b.class_id)?.what_to_bring;
+      return `<div style="border-top:1px solid #efe7df;padding:12px 0"><b>${esc(time12(b.session_time))} · ${esc(b.class_title)}</b> with ${esc(st?.name)}<br>
+        👶 ${esc(g.map((x) => x.attendee_name).join(', '))}
+        ${addr ? `<br>📍 ${esc(addr)} · <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}">Directions</a>` : ''}
+        ${bring ? `<br>🎒 Bring: ${esc(bring)}` : ''}${ct?.arrival_notes ? `<br>📝 ${esc(ct.arrival_notes)}` : ''}${ct?.phone ? `<br>📞 ${esc(ct.phone)}` : ''}</div>`;
+    }).join('');
+    const n = groups.size;
+    await send(await emailOf(bs[0].user_id), n === 1 ? `Tomorrow: ${bs[0].class_title} at ${time12(bs[0].session_time)}` : `Tomorrow: ${n} classes`,
+      layout(`See you tomorrow! 👋`, `<p>A quick reminder for ${esc(day(bs[0].session_date))}:</p>${items}<p style="color:#7a7483">Can't make it? Cancel in My classes if the class is still more than 24 hours away, so the spot goes to a family on the waitlist. Otherwise, a quick call to the studio helps them.</p>`,
+      { label: 'See my classes', url: SITE }));
+  }
+
+  if (event === 'waitlist_no_credits') {
+    const { data: st } = await db.from('studios').select('name').eq('id', data.studio_id).single();
+    await send(await emailOf(data.user_id), `A spot opened in ${data.class_title}`, layout('A spot opened up, but you were out of credits',
+      `<p>A spot opened in <b>${esc(data.class_title)}</b> with ${esc(st?.name)} on ${esc(day(data.session_date))} at ${esc(time12(data.session_time))}, but it costs ⭐ ${esc(data.credits)} credits and your balance was too low, so it went to the next family in line.</p><p>Top up your plan to grab spots like this next time.</p>`,
+      { label: 'See plans', url: SITE }));
   }
 
   if (event === 'report_created') {

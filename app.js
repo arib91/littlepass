@@ -53,7 +53,7 @@ const TERMS_VERSION = 'draft-1'; // bump when the legal text changes
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // ---------- State ----------
-let user = null, profile = null, kids = [], myBookings = [], studioBookings = [], payouts = [];
+let user = null, profile = null, kids = [], myBookings = [], myWaitlist = [], studioBookings = [], payouts = [];
 let studios = [], classes = [], slots = [], counts = {}, reviews = [], loaded = false, cancelHours = 24;
 let filters = { age: 'all', cat: 'all', hood: HOODS[0], day: 'all', studio: 'all', cls: 'all', q: '' };
 let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentStudio = null;
@@ -127,7 +127,7 @@ async function loadPublic() {
   (ct.data || []).forEach(r => { counts[`${r.slot_id}_${r.session_date}`] = Number(r.taken); });
 }
 async function loadPrivate() {
-  kids = []; myBookings = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null; adminReports = []; pastBookings = [];
+  kids = []; myBookings = []; myWaitlist = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null; adminReports = []; pastBookings = [];
   if (!user) { profile = null; return; }
   profile = (await sb.from('profiles').select('*').eq('id', user.id).single()).data;
   if (profile && profile.role === 'admin') {
@@ -148,11 +148,12 @@ async function loadPrivate() {
       studioBookings = b.data || []; payouts = po.data || [];
     }
   } else {
-    const [k, b] = await Promise.all([
+    const [k, b, w] = await Promise.all([
       sb.from('kids').select('*').order('created_at'),
       sb.from('bookings').select('*').eq('user_id', user.id),
+      sb.rpc('my_waitlist'),
     ]);
-    const mine = b.data || [];
+    const mine = b.data || []; myWaitlist = w.data || [];
     kids = k.data || []; myBookings = mine.filter(x => x.session_date >= todayStr); pastBookings = mine.filter(x => x.session_date < todayStr);
   }
 }
@@ -218,6 +219,18 @@ async function geocode(addr) {
 }
 const bookingFor = id => myBookings.find(b => `${b.slot_id}_${b.session_date}` === id);
 const isBooked = id => !!bookingFor(id);
+const waitFor = id => myWaitlist.find(w => `${w.slot_id}_${w.session_date}` === id);
+// The waitlist closes when free cancellation does, so nobody gets booked into a class they can't get out of
+const waitOpen = s => new Date(`${s.dateStr}T${s.time24}`) - Date.now() >= cancelHours * 36e5;
+// Book / Booked / Waitlist button for a session, used on cards, map pins and class details
+function sessBtn(s, extra = '') {
+  const w = waitFor(s.id);
+  if (isBooked(s.id)) return s.spots > 0 && kids.length > 1
+    ? `<button class="btn ghost" ${extra} data-book="${s.id}">+ Kid</button>` : `<button class="btn ghost" ${extra} disabled>✓ Booked</button>`;
+  if (w) return `<button class="btn ghost" ${extra} data-leavewait="${w.id}">⏳ Waitlist #${w.place}</button>`;
+  if (s.spots <= 0) return waitOpen(s) ? `<button class="btn ghost" ${extra} data-wait="${s.id}">Waitlist</button>` : `<button class="btn" ${extra} disabled>Full</button>`;
+  return null;
+}
 // A booked class, even if the studio has since changed or paused the slot
 function sessionFromBooking(b) {
   const live = SESSIONS.find(s => s.id === `${b.slot_id}_${b.session_date}`);
@@ -429,20 +442,21 @@ function contactBlock(studioId) {
   return `<div class="contact">${ct.phone ? `📞 <a class="lnk" href="tel:${esc(ct.phone)}">${esc(ct.phone)}</a>` : ''}${ct.phone && url ? ' · ' : ''}${url ? `🌐 <a class="lnk" href="${esc(url)}" target="_blank" rel="noopener">Website</a>` : ''}${ct.arrival_notes ? `<div class="meta">📝 ${esc(ct.arrival_notes)}</div>` : ''}</div>`;
 }
 function card(s, mode) {
-  const c = CATS[s.cat], booked = isBooked(s.id), left = s.spots;
+  const c = CATS[s.cat], left = s.spots;
   let action;
-  const bk = mode === 'booking' && bookingFor(s.id);
-  if (mode === 'booking') action = bk && !cancellable(bk) ? `<button class="btn ghost" disabled>Can't cancel</button><div class="meta" style="font-size:11px">Within ${cancelHours}h of start</div>` : `<button class="btn ghost" data-cancel="${s.id}">Cancel</button>`;
-  else if (booked) action = `<button class="btn ghost" disabled>✓ Booked</button>`;
-  else if (left <= 0) action = `<button class="btn" disabled>Full</button>`;
-  else action = `<button class="btn" data-book="${s.id}">Book</button>`;
+  const bk = mode === 'booking' && (s.booking || bookingFor(s.id)), wl = mode === 'booking' && s.wait;
+  if (wl) action = `<button class="btn ghost" data-leavewait="${wl.id}">Leave</button>`;
+  else if (mode === 'booking') action = bk && !cancellable(bk) ? `<button class="btn ghost" disabled>Can't cancel</button><div class="meta" style="font-size:11px">Within ${cancelHours}h of start</div>` : `<button class="btn ghost" data-cancel="${bk.id}">Cancel</button>`;
+  else action = sessBtn(s) || `<button class="btn" data-book="${s.id}">Book</button>`;
   return `<div class="card">
     <div class="emoji" style="background:${c.color}">${c.emoji}</div>
     <div>
       <h3>${esc(s.title)}</h3>
       <div class="meta"><a class="lnk" data-studio="${esc(s.studio)}">${esc(s.studio)}</a><br>📍 ${esc(s.hood)} · 🕘 ${mode === 'booking' ? dayName(s.date) + ', ' : ''}${s.time}${s.mins ? ` (${s.mins} min)` : ''}${s.loc ? (mode === 'booking' ? `<br>🧭 ${esc(s.loc.address)}<br>${dirLinks(s.loc)}` : ` · <a class="lnk" href="${gmaps(s.loc)}" target="_blank" rel="noopener">Directions</a>`) : ''}</div>
       <div class="tags">
-        ${s.ageMax ? `<span class="tag">👶 ${ageText(s.ageMin, s.ageMax)}</span>` : ''}
+        ${bk ? `<span class="tag">👶 ${esc(bk.attendee_name)}</span>` : ''}${wl ? `<span class="tag low">⏳ Waitlist #${wl.place} · ${esc(wl.attendee_name)}</span>` : ''}
+        ${s.ageMax && mode !== 'booking' ? `<span class="tag">👶 ${ageText(s.ageMin, s.ageMax)}</span>` : ''}
+        ${mode !== 'booking' && isBooked(s.id) && s.spots > 0 && kids.length > 1 ? '<span class="tag">✓ Booked</span>' : ''}
         ${(() => { const rt = s.classId && classRating(s.classId); return rt ? `<span class="tag">★ ${rt.avg.toFixed(1)} (${rt.n})</span>` : ''; })()}
         ${left <= 3 && left > 0 && mode !== 'booking' ? `<span class="tag low">Only ${left} left</span>` : ''}
         ${s.classId && mode !== 'booking' ? `<a class="lnk" style="font-size:13px" data-details="${s.classId}">Details</a>` : ''}
@@ -494,7 +508,7 @@ function showMap(list, fly) {
     const away = userPos ? ` · ${miles(userPos, p.pos).toFixed(1)} mi away` : '';
     const html = `<div class="pop"><h3><a class="lnk" data-studio="${esc(p.studio)}">${esc(p.studio)}</a></h3>
       <div class="meta">📍 ${p.loc ? esc(p.loc.address) : p.hood}${away}</div>${p.loc ? `<div class="meta">🧭 ${dirLinks(p.loc)}</div>` : ''}<div style="margin-top:8px">${mine.slice(0, 3).map(s => `<div class="cls"><div><b>${esc(s.title)}</b><br>${dayName(s.date)} · ${s.time}</div>
-      ${isBooked(s.id) ? '<span class="tag">✓ Booked</span>' : s.spots <= 0 ? '<span class="tag">Full</span>' : `<button class="btn" data-book="${s.id}">⭐ ${s.credits} · Book</button>`}</div>`).join('')}</div>
+      ${sessBtn(s, 'style="padding:6px 10px;font-size:13px"') || `<button class="btn" data-book="${s.id}">⭐ ${s.credits} · Book</button>`}</div>`).join('')}</div>
       ${mine.length > 3 ? `<div class="meta" style="margin-top:6px">+ ${mine.length - 3} more · <a class="lnk" data-studio="${esc(p.studio)}">see all</a></div>` : ''}</div>`;
     const m = L.marker(p.pos, { icon }).addTo(map).bindPopup(html, { minWidth: 240 });
     m.partner = p; markers.push(m);
@@ -544,7 +558,7 @@ function openDetails(classId) {
     ${loc ? `<p style="margin:6px 0">🧭 ${esc(loc.address)}<br>${dirLinks(loc)}</p>` : c.has_address ? '<p class="meta" style="margin:6px 0">🔒 The exact address is shared once you book.</p>' : ''}
     <div class="label" style="margin-top:12px">Next sessions</div>
     ${next.length ? next.map(s => `<div class="cls" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)"><div><b>${dayName(s.date)}</b><div class="meta">${s.time} · ${s.mins} min · ⭐ ${s.credits}</div></div>
-      <div style="margin-left:auto">${isBooked(s.id) ? '<span class="tag">✓ Booked</span>' : s.spots <= 0 ? '<span class="tag">Full</span>' : `<button class="btn" style="padding:6px 12px" data-book="${s.id}">Book</button>`}</div></div>`).join('') : '<p class="meta">No upcoming sessions.</p>'}
+      <div style="margin-left:auto">${sessBtn(s, 'style="padding:6px 12px"') || `<button class="btn" style="padding:6px 12px" data-book="${s.id}">Book</button>`}</div></div>`).join('') : '<p class="meta">No upcoming sessions.</p>'}
     <div class="actions"><button class="btn ghost" data-close>Close</button></div>`);
 }
 
@@ -692,7 +706,7 @@ function pastCard(b) {
 function renderBookings() {
   if (!user) { $('#bookingList').innerHTML = `<div class="empty">Log in to see your classes.<br><button class="btn" style="margin-top:12px" data-login>Log in</button></div>`; return; }
   const past = pastBookings.slice().sort((x, y) => (y.session_date + y.session_time).localeCompare(x.session_date + x.session_time));
-  const seg = `<div class="seg"><button data-bkview="upcoming" class="${bookView === 'upcoming' ? 'on' : ''}">Upcoming (${myBookings.length})</button><button data-bkview="past" class="${bookView === 'past' ? 'on' : ''}">Past (${past.length})</button></div>`;
+  const seg = `<div class="seg"><button data-bkview="upcoming" class="${bookView === 'upcoming' ? 'on' : ''}">Upcoming (${myBookings.length + myWaitlist.length})</button><button data-bkview="past" class="${bookView === 'past' ? 'on' : ''}">Past (${past.length})</button></div>`;
   if (bookView === 'past') {
     const studiosN = new Set(past.map(b => b.studio_id)).size;
     $('#bookingList').innerHTML = seg + (past.length
@@ -700,8 +714,10 @@ function renderBookings() {
       : `<div class="empty">No past classes yet.<br>They'll show up here after you attend.</div>`);
     return;
   }
-  const list = myBookings.map(sessionFromBooking)
-    .sort((x, y) => x.date - y.date || timeVal(x.time) - timeVal(y.time));
+  const list = [
+    ...myBookings.map(b => ({ ...sessionFromBooking(b), booking: b })),
+    ...myWaitlist.map(w => { const s = SESSIONS.find(x => x.id === `${w.slot_id}_${w.session_date}`); return s && { ...s, wait: w }; }).filter(Boolean),
+  ].sort((x, y) => x.date - y.date || timeVal(x.time) - timeVal(y.time));
   $('#bookingList').innerHTML = seg + (list.length
     ? `<div class="grid">${list.map(s => card(s, 'booking')).join('')}</div>`
     : `<div class="empty">No upcoming classes.<br><button class="btn" style="margin-top:12px" data-goexplore>Find a class</button></div>`);
@@ -765,6 +781,7 @@ async function downloadMyData() {
   } else if (profile && profile.role === 'parent') {
     await q('children', sb.from('kids').select('*'));
     await q('bookings', sb.from('bookings').select('*').eq('user_id', user.id));
+    await q('waitlists', sb.from('waitlist').select('*').eq('user_id', user.id));
     await q('reviews_written', sb.from('reviews').select('*').eq('user_id', user.id));
     await q('credit_history', sb.from('credit_ledger').select('*').eq('user_id', user.id));
   }
@@ -801,7 +818,7 @@ async function confirmDeleteAccount() {
   catch (e) { err.textContent = e.message; btn.disabled = false; btn.textContent = 'Delete everything'; return; }
   closeModal();
   try { await sb.auth.signOut({ scope: 'local' }); } catch (e) {}
-  user = null; profile = null; kids = []; myBookings = []; studioBookings = []; pastBookings = [];
+  user = null; profile = null; kids = []; myBookings = []; myWaitlist = []; studioBookings = []; pastBookings = [];
   await loadPublic(); buildSessions(); renderAll(); showTab('explore');
   toast('Your account was deleted. Take care! 🐣');
 }
@@ -1513,26 +1530,55 @@ async function handleClick(e) {
       <div class="meta">${esc(s.studio)} · ${esc(s.hood)}<br>${dayName(s.date)} at ${s.time} · ${s.mins} min<br>Ages ${ageText(s.ageMin, s.ageMax)}${s.loc ? `<br>🧭 ${esc(s.loc.address)}` : ''}</div>
       ${!s.loc && s.hasAddr ? '<p class="meta" style="margin:8px 0 0">🔒 The exact address is shared with you once you book.</p>' : ''}
       ${(() => { const cl = classById(s.classId); return cl ? `<div class="tags" style="margin:8px 0 0"><span class="tag">${PARENT_STAYS[cl.parent_stays] || ''}</span><span class="tag">${LEVELS[cl.level] || ''}</span></div>${cl.description ? `<p class="meta" style="margin:8px 0 0">${esc(cl.description.length > 160 ? cl.description.slice(0, 160) + '…' : cl.description)} <a class="lnk" data-details="${cl.id}">More</a></p>` : ''}${cl.what_to_bring ? `<p class="meta" style="margin:6px 0 0"><b>Bring:</b> ${esc(cl.what_to_bring)}</p>` : ''}` : ''; })()}
-      <p><b>Cost: ⭐ ${s.credits} credits</b> · You have ${credits}</p>
-      <div class="label">Who's coming?</div>
-      <select id="bkWho">${kids.map(k => `<option value="${esc(k.name)}">${esc(k.name)}</option>`).join('')}<option value="">${kids.length ? 'Someone else' : 'My little one'}</option></select>
+      ${whoPicker(s)}
+      <p id="bkCost"></p>
       <p class="meta" style="margin:0 0 4px">${late ? `⚠️ This class starts within ${cancelHours} hours, so this booking <b>can't be cancelled</b> or refunded.` : `Free cancellation up to ${cancelHours} hours before the class starts.`}</p>
-      ${enough ? '' : `<p class="low">You need ${s.credits - credits} more credits. Pick a plan to top up.</p>`}
       <div class="actions"><button class="btn ghost" data-close>Not now</button>
         ${enough ? `<button class="btn" data-confirm="${s.id}">Confirm booking</button>` : `<button class="btn" data-goplans>See plans</button>`}</div>`);
+    updateBookCost(s);
     return;
   }
-  if ((el = hit('[data-confirm]'))) {
-    const s = SESSIONS.find(x => x.id === el.dataset.confirm);
-    const who = ($('#bkWho') || {}).value || null;
+  if ((el = hit('[data-wait]'))) {
+    if (map) map.closePopup();
+    if (!user) return openAuth('login', 'Log in or sign up to join the waitlist.');
+    if (profile && profile.role !== 'parent') return toast('Only parent accounts can join a waitlist.');
+    const s = SESSIONS.find(x => x.id === el.dataset.wait);
+    openModal(`
+      <h2>Join the waitlist</h2>
+      <div class="meta">${esc(s.title)} · ${esc(s.studio)}<br>${dayName(s.date)} at ${s.time}</div>
+      <p>This class is full. If a spot opens up, <b>we'll book it for you automatically</b> and email you. It uses ⭐ ${s.credits} credits then, and you can still cancel for free up to ${cancelHours} hours before.</p>
+      <p class="meta">Make sure you have enough credits when a spot opens, or it goes to the next family in line.</p>
+      <div class="label">Who's coming?</div>
+      <select id="wlWho">${kids.map(k => `<option value="${esc(k.name)}">${esc(k.name)}</option>`).join('')}<option value="">${kids.length ? 'Someone else' : 'My little one'}</option></select>
+      <div class="actions"><button class="btn ghost" data-close>Not now</button><button class="btn" data-confirmwait="${s.id}">Join waitlist</button></div>`);
+    return;
+  }
+  if ((el = hit('[data-confirmwait]'))) {
+    const s = SESSIONS.find(x => x.id === el.dataset.confirmwait);
     el.disabled = true;
-    const { error } = await sb.rpc('book_class', { p_slot: s.key, p_date: s.dateStr, p_attendee: ($('#bkWho') || {}).value || null });
+    const { data, error } = await sb.rpc('join_waitlist', { p_slot: s.key, p_date: s.dateStr, p_attendee: ($('#wlWho') || {}).value || null });
+    closeModal(); await refresh();
+    if (error) return toast(error.message);
+    toast(`⏳ You're #${data} on the waitlist. We'll email you if you get in.`); return;
+  }
+  if ((el = hit('[data-leavewait]'))) {
+    if (!confirm('Leave this waitlist? You\'ll lose your place in line.')) return;
+    const { error } = await sb.rpc('leave_waitlist', { p_id: el.dataset.leavewait });
+    if (error) return toast(error.message);
+    await refresh(); toast('You left the waitlist.'); return;
+  }
+  if ((el = hit('[data-confirm]'))) {
+    const s = SESSIONS.find(x => x.id === el.dataset.confirm), who = pickedKids();
+    if (!who.length) return toast('Pick who is coming.');
+    el.disabled = true;
+    const { error } = await sb.rpc('book_class_multi', { p_slot: s.key, p_date: s.dateStr, p_attendees: who });
     closeModal();
     if (error) { toast(error.message); await refresh(); return; }
-    await refresh(); toast(`🎉 Booked ${s.title}!${s.hasAddr && !s.loc ? ' The address is in My classes.' : ''}`); return;
+    await refresh(); toast(`🎉 Booked ${s.title}${who.length > 1 ? ` for ${who.length} kids` : ''}!${s.hasAddr && !s.loc ? ' The address is in My classes.' : ''}`); return;
   }
   if ((el = hit('[data-cancel]'))) {
-    const b = bookingFor(el.dataset.cancel), s = sessionFromBooking(b);
+    const b = myBookings.find(x => x.id === el.dataset.cancel), s = sessionFromBooking(b);
+    if (!b) return;
     const { error } = await sb.rpc('cancel_booking', { p_booking: b.id });
     if (error) return toast(error.message);
     await refresh(); toast(`Cancelled. ⭐ ${s.credits} credits refunded`); return;
@@ -1542,6 +1588,34 @@ async function handleClick(e) {
   if (hit('[data-manage]')) { openPortal(); return; }
 }
 document.body.addEventListener('click', handleClick);
+
+// ---------- Booking several kids at once ----------
+// Checkboxes for each child not already booked in this session ('' = the parent's name, for families with no kids saved)
+function whoPicker(s) {
+  const taken = myBookings.filter(b => `${b.slot_id}_${b.session_date}` === s.id).map(b => b.attendee_name);
+  const free = kids.filter(k => !taken.includes(k.name));
+  if (!kids.length) return '<input type="hidden" id="bkOnly" value="">';
+  const fits = k => { const m = monthsOld(k.birthday); return m >= s.ageMin && m <= s.ageMax; };
+  const first = free.find(fits) || free[0];
+  return `<div class="label">Who's coming?</div><div id="bkWho" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px">
+    ${taken.length ? `<div class="meta">Already booked: ${esc(taken.join(', '))}</div>` : ''}
+    ${free.map(k => `<label class="chk"><input type="checkbox" value="${esc(k.name)}" ${k === first ? 'checked' : ''}> ${esc(k.name)}${fits(k) ? '' : ' <span class="meta">(outside the age range)</span>'}</label>`).join('')}
+  </div>`;
+}
+const pickedKids = () => $('#bkOnly') ? [null] : [...document.querySelectorAll('#bkWho input:checked')].map(i => i.value);
+function updateBookCost(s) {
+  const n = pickedKids().length, total = n * s.credits, have = profile ? profile.credits : 0, btn = $('[data-confirm]');
+  const tooMany = n > s.spots;
+  $('#bkCost').innerHTML = `<b>Cost: ⭐ ${total} credits</b>${n > 1 ? ` (${n} × ${s.credits})` : ''} · You have ${have}`
+    + (tooMany ? `<br><span class="low">Only ${s.spots} spot${s.spots === 1 ? '' : 's'} left.</span>` : '')
+    + (total > have ? `<br><span class="low">You need ${total - have} more credits. Pick a plan to top up.</span>` : '');
+  if (btn) btn.disabled = !n || tooMany || total > have;
+}
+document.body.addEventListener('change', e => {
+  if (!e.target.closest('#bkWho')) return;
+  const s = SESSIONS.find(x => x.id === ($('[data-confirm]') || {}).dataset?.confirm);
+  if (s) updateBookCost(s);
+});
 
 // ---------- Tabs ----------
 const VIEWS = ['explore', 'bookings', 'plans', 'profile', 'studio', 'owner', 'admin'];
