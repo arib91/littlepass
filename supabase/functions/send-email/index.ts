@@ -17,10 +17,12 @@ const TEST = (Deno.env.get('EMAIL_TEST_MODE') ?? 'true') !== 'false';
 const trace: string[] = [];
 
 const esc = (t: unknown) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
-const day = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+const day = (d: string, es = false) => new Date(d + 'T00:00:00').toLocaleDateString(es ? 'es-US' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 const time12 = (t: string) => { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; };
+// Buttons open the right screen in the app (see routeFromHash in app.js)
+const link = (screen: string) => `${SITE}/#${screen}`;
 
-function layout(title: string, inner: string, button?: { label: string; url: string }) {
+function layout(title: string, inner: string, button?: { label: string; url: string }, es = false) {
   return `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#fffaf5;padding:24px">
   <div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #efe7df;border-radius:18px;padding:28px">
     <div style="font-size:20px;font-weight:800">🐣 Little<span style="color:#ff7a59">Pass</span></div>
@@ -28,7 +30,7 @@ function layout(title: string, inner: string, button?: { label: string; url: str
     <div style="font-size:15px;line-height:1.6;color:#2d2a32">${inner}</div>
     ${button ? `<p style="margin:22px 0 0"><a href="${esc(button.url)}" style="background:#ff7a59;color:#fff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:12px;display:inline-block">${esc(button.label)}</a></p>` : ''}
   </div>
-  <p style="text-align:center;color:#7a7483;font-size:12px;margin-top:14px">LittlePass San Diego</p></div>`;
+  <p style="text-align:center;color:#7a7483;font-size:12px;margin-top:14px">LittlePass San Diego${es ? ' · clases para bebés y niños pequeños' : ''}</p></div>`;
 }
 
 async function send(to: string | undefined, subject: string, html: string) {
@@ -45,6 +47,13 @@ async function send(to: string | undefined, subject: string, html: string) {
   trace.push(`SENT "${subject}" (Resend accepted: ${(await res.json()).id})`);
 }
 
+// Parents who use the app in Spanish get their emails in Spanish too
+const isEs = async (userId?: string | null) => {
+  if (!userId) return false;
+  const { data } = await db.from('profiles').select('lang').eq('id', userId).maybeSingle();
+  return data?.lang === 'es';
+};
+
 const emailOf = async (userId?: string | null) => {
   if (!userId) return undefined;
   const { data, error } = await db.auth.admin.getUserById(userId);
@@ -59,7 +68,7 @@ async function handle(event: string, data: Record<string, string>) {
     const { data: p } = await db.from('profiles').select('display_name').eq('id', s.owner_id).maybeSingle();
     await send(ADMIN, `New studio waiting for approval: ${s.name}`, layout('A new studio signed up',
       `<p><b>${esc(s.name)}</b> is waiting for your approval.</p><p>Owner: ${esc(p?.display_name ?? '')} (${esc(await emailOf(s.owner_id) ?? '')})</p>${s.blurb ? `<p style="color:#7a7483">${esc(s.blurb)}</p>` : ''}`,
-      { label: 'Review studio', url: SITE }));
+      { label: 'Review studio', url: link('admin/studios') }));
   }
 
   if (event === 'studio_status') {
@@ -69,10 +78,11 @@ async function handle(event: string, data: Record<string, string>) {
     if (s.status === 'approved') {
       await send(to, `${s.name} is approved on LittlePass 🎉`, layout('You\'re approved! 🎉',
         `<p>Great news: <b>${esc(s.name)}</b> is now live. Parents in San Diego can find your classes and book them.</p><p>Log in to check your schedule, add photos and see bookings as they come in.</p>`,
-        { label: 'Open your dashboard', url: SITE }));
+        { label: 'Open your dashboard', url: link('owner/overview') }));
     } else if (s.status === 'rejected') {
       await send(to, `An update on ${s.name}`, layout('We couldn\'t approve your studio yet',
-        `<p>Thanks for applying with <b>${esc(s.name)}</b>. We're not able to approve it right now.</p>${s.status_note ? `<p><b>Reason:</b> ${esc(s.status_note)}</p>` : ''}<p>If you think this is a mistake or you've made changes, just reply to this email.</p>`));
+        `<p>Thanks for applying with <b>${esc(s.name)}</b>. We're not able to approve it right now.</p>${s.status_note ? `<p><b>Reason:</b> ${esc(s.status_note)}</p>` : ''}<p>If you think this is a mistake or you've made changes, just reply to this email.</p>`,
+      { label: 'Open your account', url: link('owner/account') }));
     }
   }
 
@@ -85,19 +95,30 @@ async function handle(event: string, data: Record<string, string>) {
       db.from('pricing_settings').select('cancel_hours').eq('id', 1).single(),
       db.from('studio_contacts').select('phone, website, arrival_notes').eq('studio_id', b.studio_id).maybeSingle(),
     ]);
+    const es = await isEs(b.user_id);
     const when = `${day(b.session_date)} at ${time12(b.session_time)}`;
+    const whenP = es ? `${day(b.session_date, true)} a las ${time12(b.session_time)}` : when;
+    const site = /^https?:\/\//i.test(ct?.website ?? '') ? ct!.website : ct?.website ? 'https://' + ct.website : '';   // a bare "studio.com" must not become a broken relative link
     const contact = ct && (ct.phone || ct.website || ct.arrival_notes)
-      ? `<p>${ct.phone ? `📞 ${esc(ct.phone)}<br>` : ''}${ct.website ? `🌐 <a href="${esc(ct.website)}">${esc(ct.website)}</a><br>` : ''}${ct.arrival_notes ? `📝 ${esc(ct.arrival_notes)}` : ''}</p>` : '';
+      ? `<p>${ct.phone ? `📞 ${esc(ct.phone)}<br>` : ''}${site ? `🌐 <a href="${esc(site)}">${esc(ct.website)}</a><br>` : ''}${ct.arrival_notes ? `📝 ${esc(ct.arrival_notes)}` : ''}</p>` : '';
     const addr = loc?.address as string | undefined;
     const maps = addr ? `<p>📍 ${esc(addr)}<br><a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}">Google Maps</a> · <a href="https://maps.apple.com/?daddr=${encodeURIComponent(addr)}">Apple Maps</a></p>` : '';
     const fromWaitlist = b.source === 'waitlist';
-    await send(await emailOf(b.user_id), fromWaitlist ? `A spot opened up! You're booked: ${b.class_title}` : `You're booked: ${b.class_title}`,
-      layout(fromWaitlist ? 'You\'re off the waitlist! 🎉' : 'You\'re booked! 🎉',
-      `${fromWaitlist ? '<p>A spot opened up, so we booked it for you automatically.</p>' : ''}<p><b>${esc(b.class_title)}</b> with ${esc(st?.name)}</p><p>🗓 ${esc(when)}<br>👶 ${esc(b.attendee_name)}<br>⭐ ${b.credits} credits</p>${maps}${contact}<p style="color:#7a7483">${fromWaitlist ? 'Can\'t make it anymore? ' : ''}Free cancellation up to ${pr?.cancel_hours ?? 24} hours before the class starts.</p>`,
-      { label: 'See my classes', url: SITE }));
+    const hrs = pr?.cancel_hours ?? 24;
+    if (es) {
+      await send(await emailOf(b.user_id), fromWaitlist ? `¡Se liberó un lugar! Ya reservaste: ${b.class_title}` : `Reserva confirmada: ${b.class_title}`,
+        layout(fromWaitlist ? '¡Saliste de la lista de espera! 🎉' : '¡Reserva confirmada! 🎉',
+        `${fromWaitlist ? '<p>Se liberó un lugar, así que lo reservamos automáticamente para ti.</p>' : ''}<p><b>${esc(b.class_title)}</b> con ${esc(st?.name)}</p><p>🗓 ${esc(whenP)}<br>👶 ${esc(b.attendee_name)}<br>⭐ ${b.credits} créditos</p>${maps}${contact}<p style="color:#7a7483">${fromWaitlist ? '¿Ya no puedes ir? ' : ''}Cancelación gratis hasta ${hrs} horas antes de la clase.</p>`,
+        { label: 'Ver mis clases', url: link('bookings') }, true));
+    } else {
+      await send(await emailOf(b.user_id), fromWaitlist ? `A spot opened up! You're booked: ${b.class_title}` : `You're booked: ${b.class_title}`,
+        layout(fromWaitlist ? 'You\'re off the waitlist! 🎉' : 'You\'re booked! 🎉',
+        `${fromWaitlist ? '<p>A spot opened up, so we booked it for you automatically.</p>' : ''}<p><b>${esc(b.class_title)}</b> with ${esc(st?.name)}</p><p>🗓 ${esc(when)}<br>👶 ${esc(b.attendee_name)}<br>⭐ ${b.credits} credits</p>${maps}${contact}<p style="color:#7a7483">${fromWaitlist ? 'Can\'t make it anymore? ' : ''}Free cancellation up to ${hrs} hours before the class starts.</p>`,
+        { label: 'See my classes', url: link('bookings') }));
+    }
     await send(await emailOf(st?.owner_id), `New booking: ${b.class_title}`, layout('New booking 🙌',
       `<p><b>${esc(b.attendee_name)}</b> (parent: ${esc(b.parent_name)}) booked <b>${esc(b.class_title)}</b>.</p><p>🗓 ${esc(when)}</p>`,
-      { label: 'See your bookings', url: SITE }));
+      { label: 'See your bookings', url: link('owner/bookings') }));
   }
 
   if (event === 'booking_cancelled') {
@@ -105,23 +126,33 @@ async function handle(event: string, data: Record<string, string>) {
     const { data: st } = await db.from('studios').select('name, owner_id').eq('id', data.studio_id).single();
     const when = `${day(data.session_date)} at ${time12(data.session_time)}`;
     const parentTo = await emailOf(data.user_id);
+    const es = await isEs(data.user_id);
+    const whenP = es ? `${day(data.session_date, true)} a las ${time12(data.session_time)}` : when;
     if (data.by === 'account_deleted') {
       // the parent closed their account: only the studio needs to know
       await send(await emailOf(st?.owner_id), `Booking cancelled: ${data.class_title}`, layout('A booking was cancelled',
         `<p>A parent closed their LittlePass account, so their booking for <b>${esc(data.class_title)}</b> on ${esc(when)} was cancelled.</p><p>That spot is open again.</p>`,
-        { label: 'See your bookings', url: SITE }));
+        { label: 'See your bookings', url: link('owner/bookings') }));
     } else if (data.by === 'parent') {
-      await send(parentTo, `Cancelled: ${data.class_title}`, layout('Your booking is cancelled',
+      if (es) await send(parentTo, `Cancelada: ${data.class_title}`, layout('Tu reserva fue cancelada',
+        `<p><b>${esc(data.class_title)}</b> con ${esc(st?.name)}<br>🗓 ${esc(whenP)}</p><p>Te devolvimos ⭐ ${esc(data.credits)} créditos a tu cuenta.</p>`,
+        { label: 'Buscar otra clase', url: link('explore') }, true));
+      else await send(parentTo, `Cancelled: ${data.class_title}`, layout('Your booking is cancelled',
         `<p><b>${esc(data.class_title)}</b> with ${esc(st?.name)}<br>🗓 ${esc(when)}</p><p>⭐ ${esc(data.credits)} credits are back in your account.</p>`,
-        { label: 'Find another class', url: SITE }));
+        { label: 'Find another class', url: link('explore') }));
       await send(await emailOf(st?.owner_id), `Booking cancelled: ${data.class_title}`, layout('A booking was cancelled',
         `<p><b>${esc(data.attendee)}</b> (parent: ${esc(data.parent_name)}) cancelled <b>${esc(data.class_title)}</b>.</p><p>🗓 ${esc(when)}</p><p>That spot is open again.</p>`,
-        { label: 'See your bookings', url: SITE }));
+        { label: 'See your bookings', url: link('owner/bookings') }));
+    } else if (es) {
+      const why = data.reason ? `<p><b>Motivo:</b> ${esc(data.reason)}</p>` : '';
+      await send(parentTo, `Clase cancelada: ${data.class_title}`, layout('Tu clase fue cancelada',
+        `<p>Lo sentimos: la clase <b>${esc(data.class_title)}</b> con ${esc(st?.name)} del ${esc(whenP)} fue cancelada.</p>${why}<p>Te devolvimos ⭐ ${esc(data.credits)} créditos para que reserves otra cosa.</p>`,
+        { label: 'Buscar otra clase', url: link('explore') }, true));
     } else {
       const why = data.reason ? `<p><b>Reason:</b> ${esc(data.reason)}</p>` : '';
       await send(parentTo, `Class cancelled: ${data.class_title}`, layout('Your class was cancelled',
         `<p>We're sorry: <b>${esc(data.class_title)}</b> with ${esc(st?.name)} on ${esc(when)} has been cancelled.</p>${why}<p>⭐ ${esc(data.credits)} credits have been returned to your account, so you can book something else.</p>`,
-        { label: 'Find another class', url: SITE }));
+        { label: 'Find another class', url: link('explore') }));
     }
   }
 
@@ -137,6 +168,7 @@ async function handle(event: string, data: Record<string, string>) {
       db.from('studio_contacts').select('studio_id, phone, arrival_notes').in('studio_id', studioIds),
       db.from('classes').select('id, what_to_bring').in('id', classIds),
     ]);
+    const es = await isEs(bs[0].user_id);
     // siblings in the same class share one entry
     const groups = new Map<string, typeof bs>();
     bs.forEach((b) => { const k = `${b.slot_id}_${b.session_date}`; groups.set(k, [...(groups.get(k) ?? []), b]); });
@@ -145,22 +177,31 @@ async function handle(event: string, data: Record<string, string>) {
       const st = sts?.find((s) => s.id === b.studio_id), ct = cts?.find((c) => c.studio_id === b.studio_id);
       const addr = locs?.find((l) => l.class_id === b.class_id)?.address as string | undefined;
       const bring = cls?.find((c) => c.id === b.class_id)?.what_to_bring;
-      return `<div style="border-top:1px solid #efe7df;padding:12px 0"><b>${esc(time12(b.session_time))} · ${esc(b.class_title)}</b> with ${esc(st?.name)}<br>
+      return `<div style="border-top:1px solid #efe7df;padding:12px 0"><b>${esc(time12(b.session_time))} · ${esc(b.class_title)}</b> ${es ? 'con' : 'with'} ${esc(st?.name)}<br>
         👶 ${esc(g.map((x) => x.attendee_name).join(', '))}
-        ${addr ? `<br>📍 ${esc(addr)} · <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}">Directions</a>` : ''}
-        ${bring ? `<br>🎒 Bring: ${esc(bring)}` : ''}${ct?.arrival_notes ? `<br>📝 ${esc(ct.arrival_notes)}` : ''}${ct?.phone ? `<br>📞 ${esc(ct.phone)}` : ''}</div>`;
+        ${addr ? `<br>📍 ${esc(addr)} · <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}">${es ? 'Cómo llegar' : 'Directions'}</a>` : ''}
+        ${bring ? `<br>🎒 ${es ? 'Llevar' : 'Bring'}: ${esc(bring)}` : ''}${ct?.arrival_notes ? `<br>📝 ${esc(ct.arrival_notes)}` : ''}${ct?.phone ? `<br>📞 ${esc(ct.phone)}` : ''}</div>`;
     }).join('');
     const n = groups.size;
-    await send(await emailOf(bs[0].user_id), n === 1 ? `Tomorrow: ${bs[0].class_title} at ${time12(bs[0].session_time)}` : `Tomorrow: ${n} classes`,
-      layout(`See you tomorrow! 👋`, `<p>A quick reminder for ${esc(day(bs[0].session_date))}:</p>${items}<p style="color:#7a7483">Can't make it? Cancel in My classes if the class is still more than 24 hours away, so the spot goes to a family on the waitlist. Otherwise, a quick call to the studio helps them.</p>`,
-      { label: 'See my classes', url: SITE }));
+    if (es) {
+      await send(await emailOf(bs[0].user_id), n === 1 ? `Mañana: ${bs[0].class_title} a las ${time12(bs[0].session_time)}` : `Mañana: ${n} clases`,
+        layout(`¡Nos vemos mañana! 👋`, `<p>Un recordatorio para el ${esc(day(bs[0].session_date, true))}:</p>${items}<p style="color:#7a7483">¿No puedes ir? Cancela en Mis clases si faltan más de 24 horas, así el lugar pasa a una familia en lista de espera. Si no, una llamada rápida al estudio les ayuda mucho.</p>`,
+        { label: 'Ver mis clases', url: link('bookings') }, true));
+    } else {
+      await send(await emailOf(bs[0].user_id), n === 1 ? `Tomorrow: ${bs[0].class_title} at ${time12(bs[0].session_time)}` : `Tomorrow: ${n} classes`,
+        layout(`See you tomorrow! 👋`, `<p>A quick reminder for ${esc(day(bs[0].session_date))}:</p>${items}<p style="color:#7a7483">Can't make it? Cancel in My classes if the class is still more than 24 hours away, so the spot goes to a family on the waitlist. Otherwise, a quick call to the studio helps them.</p>`,
+        { label: 'See my classes', url: link('bookings') }));
+    }
   }
 
   if (event === 'waitlist_no_credits') {
     const { data: st } = await db.from('studios').select('name').eq('id', data.studio_id).single();
-    await send(await emailOf(data.user_id), `A spot opened in ${data.class_title}`, layout('A spot opened up, but you were out of credits',
+    if (await isEs(data.user_id)) await send(await emailOf(data.user_id), `Se liberó un lugar en ${data.class_title}`, layout('Se liberó un lugar, pero no tenías créditos suficientes',
+      `<p>Se liberó un lugar en <b>${esc(data.class_title)}</b> con ${esc(st?.name)} el ${esc(day(data.session_date, true))} a las ${esc(time12(data.session_time))}, pero cuesta ⭐ ${esc(data.credits)} créditos y tu saldo no alcanzaba, así que pasó a la siguiente familia en la lista.</p><p>Recarga tu plan para aprovechar lugares así la próxima vez.</p>`,
+      { label: 'Ver planes', url: link('plans') }, true));
+    else await send(await emailOf(data.user_id), `A spot opened in ${data.class_title}`, layout('A spot opened up, but you were out of credits',
       `<p>A spot opened in <b>${esc(data.class_title)}</b> with ${esc(st?.name)} on ${esc(day(data.session_date))} at ${esc(time12(data.session_time))}, but it costs ⭐ ${esc(data.credits)} credits and your balance was too low, so it went to the next family in line.</p><p>Top up your plan to grab spots like this next time.</p>`,
-      { label: 'See plans', url: SITE }));
+      { label: 'See plans', url: link('plans') }));
   }
 
   if (event === 'daily_summary') {
@@ -181,14 +222,14 @@ async function handle(event: string, data: Record<string, string>) {
         ${row('Classes booked', d.bookings)}${row('Cancellations', d.cancellations)}${row('Active subscribers now', d.subscribers)}${row('Classes on the schedule today', d.today_bookings)}</table>
        ${todo.length ? `<p style="margin-top:16px"><b>Needs your attention</b><br>${todo.join('<br>')}</p>` : ''}
        ${errs.length ? `<p style="margin-top:16px"><b>App errors in the last 24h</b> (what broke in someone's browser)</p><ul>${errs.map((e) => `<li>${esc(e.message)} <span style="color:#7a7483">· ${e.n}× · ${esc(e.page)}</span></li>`).join('')}</ul><p style="color:#7a7483">Paste these into your chat with Claude to get them fixed.</p>` : '<p style="color:#7a7483;margin-top:16px">✅ No app errors.</p>'}`,
-      { label: 'Open the admin stats', url: SITE }));
+      { label: 'Open the admin stats', url: link('admin/stats') }));
   }
 
   if (event === 'report_created') {
     const { data: r } = await db.from('reports').select('*').eq('id', data.report_id).single();
     if (!r) return;
     await send(ADMIN, `Reported ${r.kind} needs a look`, layout('Something was reported',
-      `<p>A parent reported a <b>${esc(r.kind)}</b>.</p>${r.reason ? `<p>“${esc(r.reason)}”</p>` : ''}`, { label: 'Open reports', url: SITE }));
+      `<p>A parent reported a <b>${esc(r.kind)}</b>.</p>${r.reason ? `<p>“${esc(r.reason)}”</p>` : ''}`, { label: 'Open reports', url: link('admin/reports') }));
   }
 }
 

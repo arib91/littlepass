@@ -94,6 +94,58 @@ let adminStats = null, adminUsers = [], adminAudit = [], peopleQ = '', peopleRol
 let adminPay = [], adminPayouts = [], adminPricing = null, adminReports = [];
 let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [], locations = [], exceptions = [], contacts = [];
 
+// ---------- Language ----------
+// Parents can switch to Spanish. ES (i18n.js) maps the English text to Spanish; anything missing stays in English.
+// The studio dashboard and admin screens are English only.
+let LANG = (() => { try { const v = localStorage.getItem('lp-lang'); if (v === 'es' || v === 'en') return v; } catch (e) {} return /^es\b/i.test(navigator.language || '') ? 'es' : 'en'; })();
+const LOCALE = () => LANG === 'es' ? 'es-US' : 'en-US';
+function T(en, vars) {
+  let out = (LANG === 'es' && typeof ES !== 'undefined' && ES[en]) || en;
+  if (vars) out = out.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
+  return out;
+}
+// Messages that come back from the database or sign-in, some with a name or number inside
+const ES_PATTERNS = [
+  [/^(.+) is already booked in this class$/, '$1 ya tiene lugar en esta clase'],
+  [/^(.+) is listed twice$/, '$1 aparece dos veces'],
+  [/^Only (\d+) spot\(s\) left in this class$/, 'Solo quedan $1 lugares en esta clase'],
+  [/^The waitlist closes (\d+) hours before class$/, 'La lista de espera cierra $1 horas antes de la clase'],
+  [/^Classes can only be cancelled up to (\d+) hours before they start$/, 'Las clases solo se pueden cancelar hasta $1 horas antes de empezar'],
+  [/^Booked from waitlist: /, 'Reserva desde la lista de espera: '],
+  [/^Booked: /, 'Reserva: '],
+  [/^Refund \(you cancelled\): /, 'Reembolso (cancelaste): '],
+  [/^Refund \(class cancelled\): /, 'Reembolso (clase cancelada): '],
+  [/^Refund: you cancelled$/, 'Reembolso: cancelaste'],
+  [/^Refund: class cancelled$/, 'Reembolso: clase cancelada'],
+  [/^Adjustment by LittlePass: /, 'Ajuste de LittlePass: '],
+  [/^Monthly credits: /, 'Créditos mensuales: '],
+  [/^Correction: first-month credits$/, 'Corrección: créditos del primer mes'],
+  [/^Credits expired: subscription ended$/, 'Créditos vencidos: terminó la suscripción'],
+];
+function tx(msg) {
+  msg = String(msg || '');
+  if (LANG !== 'es') return msg;
+  if (typeof ES !== 'undefined' && ES[msg]) return ES[msg];
+  for (const [re, es] of ES_PATTERNS) if (re.test(msg)) return msg.replace(re, es);
+  return msg;
+}
+// Text written into index.html: data-t (plain text), data-th (HTML), data-tph (placeholder), data-taria (aria-label)
+const STATIC_EN = new Map();
+function applyStatic() {
+  document.documentElement.lang = LANG;
+  const keep = (el, attr, get) => { if (!STATIC_EN.has(el)) STATIC_EN.set(el, {}); const o = STATIC_EN.get(el); if (!(attr in o)) o[attr] = get(); return o[attr]; };
+  document.querySelectorAll('[data-t]').forEach(el => { el.textContent = T(keep(el, 't', () => el.textContent.trim())); });
+  document.querySelectorAll('[data-th]').forEach(el => { el.innerHTML = T(keep(el, 'h', () => el.innerHTML.trim())); });
+  document.querySelectorAll('[data-tph]').forEach(el => { el.placeholder = T(keep(el, 'ph', () => el.placeholder)); });
+  document.querySelectorAll('[data-taria]').forEach(el => { el.setAttribute('aria-label', T(keep(el, 'aria', () => el.getAttribute('aria-label')))); });
+}
+async function setLang(l) {
+  LANG = l;
+  try { localStorage.setItem('lp-lang', l); } catch (e) {}
+  if (user && profile && profile.role === 'parent') sb.from('profiles').update({ lang: l }).eq('id', user.id).then(() => {}, () => {});  // so emails come in this language
+  applyStatic(); renderAll();
+}
+
 // ---------- Helpers ----------
 const $ = s => document.querySelector(s);
 const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -104,13 +156,14 @@ const HORIZON = 14; // days parents can see and book
 const DAYS = Array.from({ length: HORIZON }, (_, i) => { const d = new Date(today); d.setDate(d.getDate() + i); return d; });
 const dayName = d => {
   const diff = Math.round((d - today) / 864e5);
-  if (diff === 0) return 'Today';
-  if (diff === 1) return 'Tomorrow';
-  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+  if (diff === 0) return T('Today');
+  if (diff === 1) return T('Tomorrow');
+  const out = d.toLocaleDateString(LOCALE(), { weekday: 'long', month: 'short', day: 'numeric' });
+  return LANG === 'es' ? out.charAt(0).toUpperCase() + out.slice(1) : out;
 };
-const dateLabel = str => new Date(str + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+const dateLabel = str => new Date(str + 'T00:00:00').toLocaleDateString(LOCALE(), { weekday: 'short', month: 'short', day: 'numeric' });
 const ageText = (min, max) => {
-  const f = m => m < 12 ? `${m} mo` : `${Math.round(m / 12 * 10) / 10} yr`;
+  const f = m => { if (m < 12) return LANG === 'es' ? `${m} meses` : `${m} mo`; const y = Math.round(m / 12 * 10) / 10; return LANG === 'es' ? `${y} ${y === 1 ? 'año' : 'años'}` : `${y} yr`; };
   return `${f(min)} – ${f(max)}`;
 };
 const monthsOld = bday => {
@@ -260,9 +313,9 @@ const waitOpen = s => new Date(`${s.dateStr}T${s.time24}`) - Date.now() >= cance
 function sessBtn(s, extra = '') {
   const w = waitFor(s.id);
   if (isBooked(s.id)) return s.spots > 0 && kids.length > 1
-    ? `<button class="btn ghost" ${extra} data-book="${s.id}">+ Kid</button>` : `<button class="btn ghost" ${extra} disabled>✓ Booked</button>`;
-  if (w) return `<button class="btn ghost" ${extra} data-leavewait="${w.id}">⏳ Waitlist #${w.place}</button>`;
-  if (s.spots <= 0) return waitOpen(s) ? `<button class="btn ghost" ${extra} data-wait="${s.id}">Waitlist</button>` : `<button class="btn" ${extra} disabled>Full</button>`;
+    ? `<button class="btn ghost" ${extra} data-book="${s.id}">${T('+ Kid')}</button>` : `<button class="btn ghost" ${extra} disabled>${T('✓ Booked')}</button>`;
+  if (w) return `<button class="btn ghost" ${extra} data-leavewait="${w.id}">${T('⏳ Waitlist #{n}', { n: w.place })}</button>`;
+  if (s.spots <= 0) return waitOpen(s) ? `<button class="btn ghost" ${extra} data-wait="${s.id}">${T('Waitlist')}</button>` : `<button class="btn" ${extra} disabled>${T('Full')}</button>`;
   return null;
 }
 // A booked class, even if the studio has since changed or paused the slot
@@ -289,7 +342,7 @@ function renderNav() {
     ? [['a-stats', '📊', 'Stats'], ['a-studios', '🏢', 'Studios' + (pend ? ` (${pend})` : '')], ['a-people', '👥', 'People'], ['a-payouts', '💸', 'Payouts' + (adminPayouts.some(p => p.status === 'pending') ? ' •' : '')], ['a-reports', '🚩', 'Reports' + (adminReports.length ? ` (${adminReports.length})` : '')], ['a-account', '⚙️', 'Account']]
     : isStudioUser()
     ? [['o-overview', '📊', 'Overview'], ['o-classes', '📚', 'Classes'], ['o-bookings', '📅', 'Bookings'], ['o-page', '🖼️', 'Page'], ['o-earnings', '💰', 'Earnings'], ['o-account', '⚙️', 'Account']]
-    : [['explore', '🔍', 'Explore'], ['bookings', '📅', 'My classes'], ['plans', '⭐', 'Plans'], ['profile', '👶', 'Family']];
+    : [['explore', '🔍', T('Explore')], ['bookings', '📅', T('My classes')], ['plans', '⭐', T('Plans')], ['profile', '👶', T('Family')]];
   const nav = document.querySelector('nav.tabs');
   nav.innerHTML = items.map(([id, ico, label]) => `<button data-tab="${id}"><span class="ico">${ico}</span>${label}</button>`).join('');
   markNav();
@@ -301,10 +354,13 @@ function markNav() {
 function renderHeader() {
   const b = $('#creditBtn');
   $('#ownerBtn').classList.toggle('hidden', !!user);
-  if (!user) b.textContent = 'Log in';
+  $('#langBtn').classList.toggle('hidden', isAdmin() || isStudioUser());
+  $('#langBtn').textContent = LANG === 'es' ? 'EN' : 'ES';
+  $('#langBtn').setAttribute('aria-label', LANG === 'es' ? 'Switch to English' : 'Cambiar a español');
+  if (!user) b.textContent = T('Log in');
   else if (isAdmin()) b.textContent = '🛡️ Admin';
   else if (isStudioUser()) { const st = myStudio(); b.textContent = '🏢 ' + (st ? st.name.slice(0, 18) : 'Studio'); }
-  else b.textContent = `⭐ ${profile ? profile.credits : 0} credits`;
+  else b.textContent = T('⭐ {n} credits', { n: profile ? profile.credits : 0 });
   renderNav();
 }
 $('#creditBtn').onclick = () => {
@@ -312,6 +368,7 @@ $('#creditBtn').onclick = () => {
   showTab(isAdmin() ? 'a-account' : isStudioUser() ? 'o-account' : 'plans');
 };
 $('#ownerBtn').onclick = () => showTab('owner');
+$('#langBtn').onclick = () => setLang(LANG === 'es' ? 'en' : 'es');
 
 // ---------- Auth ----------
 function openAuth(mode = 'login', reason = '', role = authState.role) {
@@ -319,79 +376,82 @@ function openAuth(mode = 'login', reason = '', role = authState.role) {
   if (mode === 'signup') track('start_signup');
   const su = mode === 'signup';
   openModal(`
-    <h2>${su ? 'Create your account' : 'Welcome back'}</h2>
+    <h2>${su ? T('Create your account') : T('Welcome back')}</h2>
     ${reason ? `<p class="meta" style="margin:0 0 8px">${esc(reason)}</p>` : ''}
-    <div class="seg" style="margin:8px 0 12px"><button data-authmode="login" class="${su ? '' : 'on'}">Log in</button><button data-authmode="signup" class="${su ? 'on' : ''}">Sign up</button></div>
-    ${su ? `<div class="label">I am a…</div>
-      <div class="seg" style="margin:0 0 12px"><button data-authrole="parent" class="${authState.role === 'parent' ? 'on' : ''}">👶 Parent</button><button data-authrole="studio" class="${authState.role === 'studio' ? 'on' : ''}">🏢 Studio</button></div>
-      <div class="label">Your name</div><input id="auName" placeholder="Your name" autocomplete="name">` : ''}
-    <div class="label">Email</div><input id="auEmail" type="email" placeholder="you@email.com" autocomplete="email">
-    <div class="label">Password</div><input id="auPass" type="password" placeholder="At least 6 characters" autocomplete="${su ? 'new-password' : 'current-password'}">
-    ${su ? `<label class="consent"><input type="checkbox" id="auTerms" style="width:auto;margin:3px 8px 0 0"><span>I'm 18 or older and I agree to the <a class="lnk" href="legal/terms.html" target="_blank" rel="noopener">Terms</a> and <a class="lnk" href="legal/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>${authState.role === 'studio' ? ' and the <a class="lnk" href="legal/studio-agreement.html" target="_blank" rel="noopener">Studio Partner Agreement</a>' : ''}.</span></label>` : ''}
-    ${su ? '' : '<div style="margin:-4px 0 8px"><a class="lnk" data-forgot style="font-size:14px;font-weight:700">Forgot password?</a></div>'}
+    <div class="seg" style="margin:8px 0 12px"><button data-authmode="login" class="${su ? '' : 'on'}">${T('Log in')}</button><button data-authmode="signup" class="${su ? 'on' : ''}">${T('Sign up')}</button></div>
+    ${su ? `<div class="label">${T('I am a…')}</div>
+      <div class="seg" style="margin:0 0 12px"><button data-authrole="parent" class="${authState.role === 'parent' ? 'on' : ''}">${T('👶 Parent')}</button><button data-authrole="studio" class="${authState.role === 'studio' ? 'on' : ''}">${T('🏢 Studio')}</button></div>
+      <div class="label">${T('Your name')}</div><input id="auName" placeholder="${T('Your name')}" autocomplete="name">` : ''}
+    <div class="label">${T('Email')}</div><input id="auEmail" type="email" placeholder="${T('you@email.com')}" autocomplete="email">
+    <div class="label">${T('Password')}</div><input id="auPass" type="password" placeholder="${T('At least 6 characters')}" autocomplete="${su ? 'new-password' : 'current-password'}">
+    ${su ? `<label class="consent"><input type="checkbox" id="auTerms" style="width:auto;margin:3px 8px 0 0"><span>${T("I'm 18 or older and I agree to the {terms} and {privacy}{studio}.", {
+      terms: `<a class="lnk" href="legal/terms.html" target="_blank" rel="noopener">${T('Terms')}</a>`,
+      privacy: `<a class="lnk" href="legal/privacy.html" target="_blank" rel="noopener">${T('Privacy Policy')}</a>`,
+      studio: authState.role === 'studio' ? T(' and the {link}', { link: `<a class="lnk" href="legal/studio-agreement.html" target="_blank" rel="noopener">${T('Studio Partner Agreement')}</a>` }) : '' })}${LANG === 'es' ? ' <span class="meta">(documentos en inglés)</span>' : ''}</span></label>` : ''}
+    ${su ? '' : `<div style="margin:-4px 0 8px"><a class="lnk" data-forgot style="font-size:14px;font-weight:700">${T('Forgot password?')}</a></div>`}
     <div class="err" id="auErr"></div>
-    <div class="actions"><button class="btn ghost" data-close>Cancel</button><button class="btn" data-authgo>${su ? 'Create account' : 'Log in'}</button></div>`);
+    <div class="actions"><button class="btn ghost" data-close>${T('Cancel')}</button><button class="btn" data-authgo>${su ? T('Create account') : T('Log in')}</button></div>`);
   setTimeout(() => { const f = $('#auName') || $('#auEmail'); if (f) f.focus(); }, 50);
 }
 async function forgotPassword() {
   const email = $('#auEmail').value.trim(), err = $('#auErr');
-  if (!email) { err.textContent = 'Type your email above first, then click "Forgot password?"'; return; }
+  if (!email) { err.textContent = T('Type your email above first, then click "Forgot password?"'); return; }
   const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
-  if (error) { err.textContent = error.message; return; }
-  openModal('<h2>Check your email 📬</h2><p>If there is an account for <b>' + esc(email) + '</b>, we sent a link to choose a new password. It can take a minute, and check your spam folder.</p><div class="actions"><button class="btn" data-close>OK</button></div>');
+  if (error) { err.textContent = tx(error.message); return; }
+  openModal(`<h2>${T('Check your email 📬')}</h2><p>${T('If there is an account for {email}, we sent a link to choose a new password. It can take a minute, and check your spam folder.', { email: '<b>' + esc(email) + '</b>' })}</p><div class="actions"><button class="btn" data-close>OK</button></div>`);
 }
 function openNewPassword() {
-  openModal(`<h2>Choose a new password</h2>
-    <div class="label">New password</div><input id="npPass" type="password" placeholder="At least 6 characters" autocomplete="new-password">
+  openModal(`<h2>${T('Choose a new password')}</h2>
+    <div class="label">${T('New password')}</div><input id="npPass" type="password" placeholder="${T('At least 6 characters')}" autocomplete="new-password">
     <div class="err" id="npErr"></div>
-    <div class="actions"><button class="btn ghost" data-close>Cancel</button><button class="btn" data-setpass>Save password</button></div>`);
+    <div class="actions"><button class="btn ghost" data-close>${T('Cancel')}</button><button class="btn" data-setpass>${T('Save password')}</button></div>`);
 }
 async function setNewPassword() {
   const pw = $('#npPass').value;
-  if (pw.length < 6) { $('#npErr').textContent = 'Use at least 6 characters.'; return; }
+  if (pw.length < 6) { $('#npErr').textContent = T('Use at least 6 characters.'); return; }
   const { error } = await sb.auth.updateUser({ password: pw });
-  if (error) { $('#npErr').textContent = error.message; return; }
-  closeModal(); toast('Password updated. You\'re logged in ✓');
+  if (error) { $('#npErr').textContent = tx(error.message); return; }
+  closeModal(); toast(T("Password updated. You're logged in ✓"));
 }
 async function authGo() {
   const email = $('#auEmail').value.trim(), password = $('#auPass').value, err = $('#auErr');
   err.textContent = '';
-  if (!email || !password) { err.textContent = 'Please enter your email and password.'; return; }
+  if (!email || !password) { err.textContent = T('Please enter your email and password.'); return; }
   const btn = $('[data-authgo]'); btn.disabled = true;
   let res;
   if (authState.mode === 'signup') {
     const name = $('#auName').value.trim();
-    if (!name) { err.textContent = 'Please enter your name.'; btn.disabled = false; return; }
-    if (!$('#auTerms').checked) { err.textContent = 'Please agree to the Terms and Privacy Policy to create an account.'; btn.disabled = false; return; }
-    res = await sb.auth.signUp({ email, password, options: { data: { name, role: authState.role, terms_version: TERMS_VERSION, terms_accepted_at: new Date().toISOString() } } });
+    if (!name) { err.textContent = T('Please enter your name.'); btn.disabled = false; return; }
+    if (!$('#auTerms').checked) { err.textContent = T('Please agree to the Terms and Privacy Policy to create an account.'); btn.disabled = false; return; }
+    res = await sb.auth.signUp({ email, password, options: { data: { name, role: authState.role, terms_version: TERMS_VERSION, terms_accepted_at: new Date().toISOString(), lang: LANG } } });
     if (!res.error && !res.data.session) {
-      openModal('<h2>Check your email 📬</h2><p>We sent a confirmation link to <b>' + esc(email) + '</b>. Click it, then come back and log in.</p><div class="actions"><button class="btn" data-close>OK</button></div>');
+      openModal(`<h2>${T('Check your email 📬')}</h2><p>${T('We sent a confirmation link to {email}. Click it, then come back and log in.', { email: '<b>' + esc(email) + '</b>' })}</p><div class="actions"><button class="btn" data-close>OK</button></div>`);
       return;
     }
   } else {
     res = await sb.auth.signInWithPassword({ email, password });
   }
-  if (res.error) { err.textContent = res.error.message; btn.disabled = false; return; }
+  if (res.error) { err.textContent = tx(res.error.message); btn.disabled = false; return; }
   closeModal();
-  toast(authState.mode === 'signup' ? 'Welcome to LittlePass! 🎉' : 'Logged in');
+  toast(authState.mode === 'signup' ? T('Welcome to LittlePass! 🎉') : T('Logged in'));
 }
 $('#modal').addEventListener('keydown', e => { if (e.key === 'Enter' && $('[data-authgo]')) authGo(); });
 
 // ---------- Filters UI ----------
 function renderFilters() {
   $('#ageChips').innerHTML = AGES.map(a =>
-    `<button class="chip ${filters.age === a.id ? 'on' : ''}" data-age="${a.id}">${a.label}</button>`).join('')
+    `<button class="chip ${filters.age === a.id ? 'on' : ''}" data-age="${a.id}">${T(a.label)}</button>`).join('')
     + kids.map((k, i) =>
     `<button class="chip ${filters.age === 'kid' + i ? 'on' : ''}" data-age="kid${i}">👶 ${esc(k.name)}</button>`).join('');
   $('#catChips').innerHTML = Object.entries(CATS).map(([id, c]) =>
-    `<button class="chip ${filters.cat === id ? 'on' : ''}" data-cat="${id}">${c.emoji} ${c.label}</button>`).join('');
+    `<button class="chip ${filters.cat === id ? 'on' : ''}" data-cat="${id}">${c.emoji} ${T(c.label)}</button>`).join('');
   const studioNames = [...new Set(SESSIONS.map(s => s.studio))].sort((a, b) => a.localeCompare(b));
   const classTitles = [...new Set(SESSIONS.filter(s => filters.studio === 'all' || s.studio === filters.studio).map(s => s.title))].sort((a, b) => a.localeCompare(b));
   if (filters.studio !== 'all' && !studioNames.includes(filters.studio)) filters.studio = 'all';
   if (filters.cls !== 'all' && !classTitles.includes(filters.cls)) filters.cls = 'all';
-  $('#studioSel').innerHTML = `<option value="all">All studios</option>` + studioNames.map(n => `<option value="${esc(n)}" ${filters.studio === n ? 'selected' : ''}>${esc(n)}</option>`).join('');
-  $('#classSel').innerHTML = `<option value="all">All classes</option>` + classTitles.map(n => `<option value="${esc(n)}" ${filters.cls === n ? 'selected' : ''}>${esc(n)}</option>`).join('');
-  $('#hoodSel').innerHTML = HOODS.map(h => `<option ${filters.hood === h ? 'selected' : ''}>${h}</option>`).join('');
+  $('#studioSel').innerHTML = `<option value="all">${T('All studios')}</option>` + studioNames.map(n => `<option value="${esc(n)}" ${filters.studio === n ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  $('#classSel').innerHTML = `<option value="all">${T('All classes')}</option>` + classTitles.map(n => `<option value="${esc(n)}" ${filters.cls === n ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  $('#hoodSel').innerHTML = HOODS.map(h => `<option value="${h}" ${filters.hood === h ? 'selected' : ''}>${h === HOODS[0] ? T(h) : h}</option>`).join('');
   updateFilterBadge();
   renderDayCal();
 }
@@ -402,10 +462,10 @@ function renderDayCal() {
   SESSIONS.filter(s => matches(s, true)).forEach(s => { counts[s.dateStr] = (counts[s.dateStr] || 0) + 1; });
   const cell = (d, i) => {
     const n = counts[fmt(d)] || 0, on = String(filters.day) === String(i);
-    const top = i === 0 ? 'Today' : d.getDate() === 1 ? d.toLocaleDateString('en-US', { month: 'short' }) : d.toLocaleDateString('en-US', { weekday: 'short' });
-    return `<button class="calcell ${on ? 'on' : ''} ${n ? '' : 'zero'}" data-day="${i}" aria-pressed="${on}" title="${d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}: ${n} class${n === 1 ? '' : 'es'}"><span>${top}</span><b>${d.getDate()}</b><small>${n || '·'}</small></button>`;
+    const top = i === 0 ? T('Today') : d.getDate() === 1 ? d.toLocaleDateString(LOCALE(), { month: 'short' }) : d.toLocaleDateString(LOCALE(), { weekday: 'short' });
+    return `<button class="calcell ${on ? 'on' : ''} ${n ? '' : 'zero'}" data-day="${i}" aria-pressed="${on}" title="${d.toLocaleDateString(LOCALE(), { weekday: 'long', month: 'long', day: 'numeric' })}: ${T(n === 1 ? '{n} class' : '{n} classes', { n })}"><span>${top}</span><b>${d.getDate()}</b><small>${n || '·'}</small></button>`;
   };
-  box.innerHTML = `<button class="chip ${filters.day === 'all' ? 'on' : ''}" data-day="all" style="margin-bottom:8px">All ${HORIZON} days</button><div class="cal">${DAYS.map(cell).join('')}</div>`;
+  box.innerHTML = `<button class="chip ${filters.day === 'all' ? 'on' : ''}" data-day="all" style="margin-bottom:8px">${T('All {n} days', { n: HORIZON })}</button><div class="cal">${DAYS.map(cell).join('')}</div>`;
 }
 $('#ageChips').onclick = e => { const b = e.target.closest('[data-age]'); if (!b) return; filters.age = b.dataset.age; renderFilters(); renderResults(); };
 $('#catChips').onclick = e => { const b = e.target.closest('[data-cat]'); if (!b) return; filters.cat = b.dataset.cat; renderFilters(); renderResults(); };
@@ -429,7 +489,7 @@ function matches(s, ignoreDay) {
   if (filters.cls !== 'all' && s.title !== filters.cls) return false;
   const terms = filters.q.toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length) {
-    const hay = `${s.title} ${s.studio} ${s.hood} ${CATS[s.cat].label}`.toLowerCase();
+    const hay = `${s.title} ${s.studio} ${s.hood} ${CATS[s.cat].label} ${T(CATS[s.cat].label)}`.toLowerCase();
     if (!terms.every(t => hay.includes(t))) return false;
   }
   return true;
@@ -465,7 +525,7 @@ function renderStudioHits() {
   let hits = [];
   if (filters.studio !== 'all') hits = [filters.studio];
   else if (terms.length) hits = names.filter(n => terms.every(t => n.toLowerCase().includes(t)));
-  el.innerHTML = hits.length ? `<div class="hits">🏢 ${filters.studio !== 'all' ? 'Studio page:' : 'Studios:'} ${hits.slice(0, 5).map(n => `<a class="lnk" data-studio="${esc(n)}">${esc(n)} →</a>`).join('')}</div>` : '';
+  el.innerHTML = hits.length ? `<div class="hits">🏢 ${filters.studio !== 'all' ? T('Studio page:') : T('Studios:')} ${hits.slice(0, 5).map(n => `<a class="lnk" data-studio="${esc(n)}">${esc(n)} →</a>`).join('')}</div>` : '';
 }
 
 const classRating = id => { const rs = reviews.filter(r => r.class_id === id && !r.hidden); return rs.length ? { n: rs.length, avg: rs.reduce((t, r) => t + r.stars, 0) / rs.length } : null; };
@@ -474,27 +534,27 @@ function contactBlock(studioId) {
   const ct = contacts.find(x => x.studio_id === studioId);
   if (!ct || !(ct.phone || ct.website || ct.arrival_notes)) return '';
   const url = safeUrl(ct.website);
-  return `<div class="contact">${ct.phone ? `📞 <a class="lnk" href="tel:${esc(ct.phone)}">${esc(ct.phone)}</a>` : ''}${ct.phone && url ? ' · ' : ''}${url ? `🌐 <a class="lnk" href="${esc(url)}" target="_blank" rel="noopener">Website</a>` : ''}${ct.arrival_notes ? `<div class="meta">📝 ${esc(ct.arrival_notes)}</div>` : ''}</div>`;
+  return `<div class="contact">${ct.phone ? `📞 <a class="lnk" href="tel:${esc(ct.phone)}">${esc(ct.phone)}</a>` : ''}${ct.phone && url ? ' · ' : ''}${url ? `🌐 <a class="lnk" href="${esc(url)}" target="_blank" rel="noopener">${T('Website')}</a>` : ''}${ct.arrival_notes ? `<div class="meta">📝 ${esc(ct.arrival_notes)}</div>` : ''}</div>`;
 }
 function card(s, mode) {
   const c = CATS[s.cat], left = s.spots;
   let action;
   const bk = mode === 'booking' && (s.booking || bookingFor(s.id)), wl = mode === 'booking' && s.wait;
-  if (wl) action = `<button class="btn ghost" data-leavewait="${wl.id}">Leave</button>`;
-  else if (mode === 'booking') action = bk && !cancellable(bk) ? `<button class="btn ghost" disabled>Can't cancel</button><div class="meta" style="font-size:11px">Within ${cancelHours}h of start</div>` : `<button class="btn ghost" data-cancel="${bk.id}">Cancel</button>`;
-  else action = sessBtn(s) || `<button class="btn" data-book="${s.id}">Book</button>`;
+  if (wl) action = `<button class="btn ghost" data-leavewait="${wl.id}">${T('Leave')}</button>`;
+  else if (mode === 'booking') action = bk && !cancellable(bk) ? `<button class="btn ghost" disabled>${T("Can't cancel")}</button><div class="meta" style="font-size:11px">${T('Within {h}h of start', { h: cancelHours })}</div>` : `<button class="btn ghost" data-cancel="${bk.id}">${T('Cancel')}</button>`;
+  else action = sessBtn(s) || `<button class="btn" data-book="${s.id}">${T('Book')}</button>`;
   return `<div class="card">
     <div class="emoji" style="background:${c.color}">${c.emoji}</div>
     <div>
       <h3>${esc(s.title)}</h3>
-      <div class="meta"><a class="lnk" data-studio="${esc(s.studio)}">${esc(s.studio)}</a><br>📍 ${esc(s.hood)} · 🕘 ${mode === 'booking' ? dayName(s.date) + ', ' : ''}${s.time}${s.mins ? ` (${s.mins} min)` : ''}${s.loc ? (mode === 'booking' ? `<br>🧭 ${esc(s.loc.address)}<br>${dirLinks(s.loc)}` : ` · <a class="lnk" href="${gmaps(s.loc)}" target="_blank" rel="noopener">Directions</a>`) : ''}</div>
+      <div class="meta"><a class="lnk" data-studio="${esc(s.studio)}">${esc(s.studio)}</a><br>📍 ${esc(s.hood)} · 🕘 ${mode === 'booking' ? dayName(s.date) + ', ' : ''}${s.time}${s.mins ? ` (${s.mins} min)` : ''}${s.loc ? (mode === 'booking' ? `<br>🧭 ${esc(s.loc.address)}<br>${dirLinks(s.loc)}` : ` · <a class="lnk" href="${gmaps(s.loc)}" target="_blank" rel="noopener">${T('Directions')}</a>`) : ''}</div>
       <div class="tags">
-        ${bk ? `<span class="tag">👶 ${esc(bk.attendee_name)}</span>` : ''}${wl ? `<span class="tag low">⏳ Waitlist #${wl.place} · ${esc(wl.attendee_name)}</span>` : ''}
+        ${bk ? `<span class="tag">👶 ${esc(bk.attendee_name)}</span>` : ''}${wl ? `<span class="tag low">${T('⏳ Waitlist #{n}', { n: wl.place })} · ${esc(wl.attendee_name)}</span>` : ''}
         ${s.ageMax && mode !== 'booking' ? `<span class="tag">👶 ${ageText(s.ageMin, s.ageMax)}</span>` : ''}
-        ${mode !== 'booking' && isBooked(s.id) && s.spots > 0 && kids.length > 1 ? '<span class="tag">✓ Booked</span>' : ''}
+        ${mode !== 'booking' && isBooked(s.id) && s.spots > 0 && kids.length > 1 ? `<span class="tag">${T('✓ Booked')}</span>` : ''}
         ${(() => { const rt = s.classId && classRating(s.classId); return rt ? `<span class="tag">★ ${rt.avg.toFixed(1)} (${rt.n})</span>` : ''; })()}
-        ${left <= 3 && left > 0 && mode !== 'booking' ? `<span class="tag low">Only ${left} left</span>` : ''}
-        ${s.classId && mode !== 'booking' ? `<a class="lnk" style="font-size:13px" data-details="${s.classId}">Details</a>` : ''}
+        ${left <= 3 && left > 0 && mode !== 'booking' ? `<span class="tag low">${T('Only {n} left', { n: left })}</span>` : ''}
+        ${s.classId && mode !== 'booking' ? `<a class="lnk" style="font-size:13px" data-details="${s.classId}">${T('Details')}</a>` : ''}
       </div>
       ${mode === 'booking' ? contactBlock(s.studioId) : ''}
     </div>
@@ -507,11 +567,11 @@ function renderResults() {
   const mapMode = exploreMode === 'map';
   $('#results').classList.toggle('hidden', mapMode);
   $('#mapWrap').classList.toggle('hidden', !mapMode);
-  if (!loaded) { $('#results').innerHTML = '<div class="empty">Loading classes… 🐣</div>'; return; }
+  if (!loaded) { $('#results').innerHTML = `<div class="empty">${T('Loading classes… 🐣')}</div>`; return; }
   const list = SESSIONS.filter(s => matches(s));
   if (mapMode) { showMap(list); return; }
-  if (!list.length) { $('#results').innerHTML = `<div class="empty">No classes match${filtersActive() ? ' these filters' : ''}.<br>Try another neighborhood or day 🌊<br>${filtersActive() ? '<button class="btn ghost" style="margin-top:12px" data-clearfilters>Clear all filters</button>' : ''}</div>`; return; }
-  let html = filtersActive() ? `<div class="meta" style="margin:4px 0">${list.length} session${list.length === 1 ? '' : 's'} found · <a class="lnk" data-clearfilters>clear filters</a></div>` : '';
+  if (!list.length) { $('#results').innerHTML = `<div class="empty">${filtersActive() ? T('No classes match these filters.') : T('No classes match.')}<br>${T('Try another neighborhood or day 🌊')}<br>${filtersActive() ? `<button class="btn ghost" style="margin-top:12px" data-clearfilters>${T('Clear all filters')}</button>` : ''}</div>`; return; }
+  let html = filtersActive() ? `<div class="meta" style="margin:4px 0">${T(list.length === 1 ? '{n} session found' : '{n} sessions found', { n: list.length })} · <a class="lnk" data-clearfilters>${T('clear filters')}</a></div>` : '';
   DAYS.forEach(d => {
     const items = list.filter(s => s.date.getTime() === d.getTime()).sort((a, b) => timeVal(a.time) - timeVal(b.time));
     if (items.length) html += `<h2 class="day-h">${dayName(d)}</h2><div class="grid">${items.map(s => card(s)).join('')}</div>`;
@@ -534,17 +594,17 @@ function showMap(list, fly) {
   }
   markers.forEach(m => m.remove()); markers = [];
   const shown = PARTNERS.filter(p => list.some(s => s.studio === p.studio && s.hood === p.hood && sessKey(s) === p.key));
-  $('#mapCount').textContent = `${shown.length} partner${shown.length === 1 ? '' : 's'} match your filters`;
+  $('#mapCount').textContent = T(shown.length === 1 ? '{n} partner matches your filters' : '{n} partners match your filters', { n: shown.length });
   shown.forEach(p => {
     const mine = list.filter(s => s.studio === p.studio && s.hood === p.hood && sessKey(s) === p.key).sort((a, b) => a.date - b.date);
     const c = CATS[filters.cat !== 'all' ? filters.cat : mine[0].cat];
     const icon = L.divIcon({ className: '', iconSize: [38, 38], iconAnchor: [19, 38], popupAnchor: [0, -36],
       html: `<div class="pin" style="background:${c.color}"><span>${c.emoji}</span></div>` });
-    const away = userPos ? ` · ${miles(userPos, p.pos).toFixed(1)} mi away` : '';
+    const away = userPos ? ` · ${T('{d} mi away', { d: miles(userPos, p.pos).toFixed(1) })}` : '';
     const html = `<div class="pop"><h3><a class="lnk" data-studio="${esc(p.studio)}">${esc(p.studio)}</a></h3>
       <div class="meta">📍 ${p.loc ? esc(p.loc.address) : p.hood}${away}</div>${p.loc ? `<div class="meta">🧭 ${dirLinks(p.loc)}</div>` : ''}<div style="margin-top:8px">${mine.slice(0, 3).map(s => `<div class="cls"><div><b>${esc(s.title)}</b><br>${dayName(s.date)} · ${s.time}</div>
-      ${sessBtn(s, 'style="padding:6px 10px;font-size:13px"') || `<button class="btn" data-book="${s.id}">⭐ ${s.credits} · Book</button>`}</div>`).join('')}</div>
-      ${mine.length > 3 ? `<div class="meta" style="margin-top:6px">+ ${mine.length - 3} more · <a class="lnk" data-studio="${esc(p.studio)}">see all</a></div>` : ''}</div>`;
+      ${sessBtn(s, 'style="padding:6px 10px;font-size:13px"') || `<button class="btn" data-book="${s.id}">⭐ ${s.credits} · ${T('Book')}</button>`}</div>`).join('')}</div>
+      ${mine.length > 3 ? `<div class="meta" style="margin-top:6px">${T('+ {n} more', { n: mine.length - 3 })} · <a class="lnk" data-studio="${esc(p.studio)}">${T('see all')}</a></div>` : ''}</div>`;
     const m = L.marker(p.pos, { icon }).addTo(map).bindPopup(html, { minWidth: 240 });
     m.partner = p; markers.push(m);
   });
@@ -552,7 +612,7 @@ function showMap(list, fly) {
   userMarker = null;
   if (userPos) userMarker = L.marker(userPos, { icon: L.divIcon({ className: '', iconSize: [16, 16], html: '<div class="me"></div>' }) }).addTo(map);
   const near = userPos ? shown.map(p => [p, miles(userPos, p.pos)]).sort((a, b) => a[1] - b[1]).slice(0, 3) : [];
-  $('#nearList').innerHTML = near.length ? '<b>Closest to you:</b> ' + near.map(([p, d]) => `<a class="lnk" data-studio="${esc(p.studio)}">${esc(p.studio)}</a> (${d.toFixed(1)} mi)`).join(' · ') : '';
+  $('#nearList').innerHTML = near.length ? `<b>${T('Closest to you:')}</b> ` + near.map(([p, d]) => `<a class="lnk" data-studio="${esc(p.studio)}">${esc(p.studio)}</a> (${d.toFixed(1)} mi)`).join(' · ') : '';
   setTimeout(() => {
     map.invalidateSize();
     let pts = markers.map(m => m.getLatLng());
@@ -568,13 +628,13 @@ $('#seg').onclick = e => {
   renderResults();
 };
 $('#nearBtn').onclick = () => {
-  if (!navigator.geolocation) return toast('Location is not available in this browser');
-  toast('Finding you…');
+  if (!navigator.geolocation) return toast(T('Location is not available in this browser'));
+  toast(T('Finding you…'));
   navigator.geolocation.getCurrentPosition(pos => {
     const here = [pos.coords.latitude, pos.coords.longitude];
-    if (Math.min(...PARTNERS.map(p => miles(here, p.pos))) > 60) { toast("You're outside San Diego. Showing all partners."); return; }
+    if (Math.min(...PARTNERS.map(p => miles(here, p.pos))) > 60) { toast(T("You're outside San Diego. Showing all partners.")); return; }
     userPos = here; showMap(SESSIONS.filter(s => matches(s)), true);
-  }, () => toast("Couldn't get your location. Allow location access and try again."), { timeout: 8000 });
+  }, () => toast(T("Couldn't get your location. Allow location access and try again.")), { timeout: 8000 });
 };
 
 // ---------- Class details ----------
@@ -586,15 +646,15 @@ function openDetails(classId) {
     <div class="emoji" style="background:${cat.color};margin-bottom:10px">${cat.emoji}</div>
     <h2 style="margin-bottom:2px">${esc(c.title)}</h2>
     <div class="meta"><a class="lnk" data-studio="${esc(st ? st.name : '')}">${esc(st ? st.name : '')}</a> · 📍 ${esc(c.hood)}${rt ? ` · ★ ${rt.avg.toFixed(1)} (${rt.n})` : ''}</div>
-    <div class="tags"><span class="tag">👶 ${ageText(c.age_min, c.age_max)}</span><span class="tag">${PARENT_STAYS[c.parent_stays] || ''}</span><span class="tag">${LEVELS[c.level] || ''}</span></div>
-    ${c.description ? `<p style="white-space:pre-line;margin:12px 0 6px">${esc(c.description)}</p>` : '<p class="meta" style="margin:12px 0 6px">The studio hasn\'t added a description yet.</p>'}
-    ${c.focus ? `<p style="margin:6px 0"><b>Focus:</b> ${esc(c.focus)}</p>` : ''}
-    ${c.what_to_bring ? `<p style="margin:6px 0"><b>What to bring:</b> ${esc(c.what_to_bring)}</p>` : ''}
-    ${loc ? `<p style="margin:6px 0">🧭 ${esc(loc.address)}<br>${dirLinks(loc)}</p>` : c.has_address ? '<p class="meta" style="margin:6px 0">🔒 The exact address is shared once you book.</p>' : ''}
-    <div class="label" style="margin-top:12px">Next sessions</div>
+    <div class="tags"><span class="tag">👶 ${ageText(c.age_min, c.age_max)}</span><span class="tag">${T(PARENT_STAYS[c.parent_stays] || '')}</span><span class="tag">${T(LEVELS[c.level] || '')}</span></div>
+    ${c.description ? `<p style="white-space:pre-line;margin:12px 0 6px">${esc(c.description)}</p>` : `<p class="meta" style="margin:12px 0 6px">${T("The studio hasn't added a description yet.")}</p>`}
+    ${c.focus ? `<p style="margin:6px 0"><b>${T('Focus:')}</b> ${esc(c.focus)}</p>` : ''}
+    ${c.what_to_bring ? `<p style="margin:6px 0"><b>${T('What to bring:')}</b> ${esc(c.what_to_bring)}</p>` : ''}
+    ${loc ? `<p style="margin:6px 0">🧭 ${esc(loc.address)}<br>${dirLinks(loc)}</p>` : c.has_address ? `<p class="meta" style="margin:6px 0">${T('🔒 The exact address is shared once you book.')}</p>` : ''}
+    <div class="label" style="margin-top:12px">${T('Next sessions')}</div>
     ${next.length ? next.map(s => `<div class="cls" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)"><div><b>${dayName(s.date)}</b><div class="meta">${s.time} · ${s.mins} min · ⭐ ${s.credits}</div></div>
-      <div style="margin-left:auto">${sessBtn(s, 'style="padding:6px 12px"') || `<button class="btn" style="padding:6px 12px" data-book="${s.id}">Book</button>`}</div></div>`).join('') : '<p class="meta">No upcoming sessions.</p>'}
-    <div class="actions"><button class="btn ghost" data-close>Close</button></div>`);
+      <div style="margin-left:auto">${sessBtn(s, 'style="padding:6px 12px"') || `<button class="btn" style="padding:6px 12px" data-book="${s.id}">${T('Book')}</button>`}</div></div>`).join('') : `<p class="meta">${T('No upcoming sessions.')}</p>`}
+    <div class="actions"><button class="btn ghost" data-close>${T('Close')}</button></div>`);
 }
 
 // ---------- Studio pages ----------
@@ -607,35 +667,62 @@ function showStudio(name, fromHash) {
   const h = '#studio/' + encodeURIComponent(name);
   if (!fromHash && location.hash !== h) location.hash = h;   // makes the studio page a shareable link
 }
+// Links from emails open a specific screen: #explore, #bookings, #plans, #family, #owner/<tab>, #admin/<tab>
+const OWNER_TABS = ['overview', 'classes', 'bookings', 'page', 'earnings', 'account'];
+const ADMIN_TABS = ['stats', 'studios', 'people', 'payouts', 'pricing', 'reports', 'account'];
+let pendingRoute = null;
+function routeFromHash() {
+  const h = decodeURIComponent(location.hash.slice(1));
+  const simple = { explore: 'explore', bookings: 'bookings', plans: 'plans', family: 'profile' };
+  if (simple[h]) return simple[h];
+  let m = h.match(/^owner\/(\w+)$/); if (m && OWNER_TABS.includes(m[1])) return 'o-' + m[1];
+  m = h.match(/^admin\/(\w+)$/); if (m && ADMIN_TABS.includes(m[1])) return 'a-' + m[1];
+  return null;
+}
+// Show the screen if this account can see it; studio and admin screens wait until the right person logs in
+function applyRoute() {
+  const r = pendingRoute; if (!r) return false;
+  const needs = r.startsWith('o-') ? 'studio' : r.startsWith('a-') ? 'admin' : null;
+  if (needs && !(needs === 'studio' ? isStudioUser() : isAdmin())) {
+    if (!user) openAuth('login', T('Log in to continue.'));
+    return false;
+  }
+  pendingRoute = null;
+  history.replaceState(null, '', location.pathname + location.search);
+  showTab(r);
+  return true;
+}
 window.addEventListener('hashchange', () => {
+  const route = routeFromHash();
+  if (route) { pendingRoute = route; if (loaded) applyRoute(); return; }
   const m = location.hash.match(/^#studio\/(.+)$/);
   if (m && loaded) { const n = decodeURIComponent(m[1]); if (studioByName(n) && n !== currentStudio) showStudio(n, true); }
   else if (!m && currentView === 'studio') showTab(lastTab || 'explore');
 });
 const avgOf = (arr, f) => { const v = arr.map(f).filter(x => x != null); return v.length ? v.reduce((t, x) => t + x, 0) / v.length : null; };
 const photoUrl = p => sb.storage.from('studio-photos').getPublicUrl(p.path).data.publicUrl;
-const fmtDate = d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const fmtDate = d => new Date(d).toLocaleDateString(LOCALE(), { month: 'short', day: 'numeric', year: 'numeric' });
 const starSel = (id, v) => `<select id="${id}">${[5, 4, 3, 2, 1].map(n => `<option value="${n}" ${n === v ? 'selected' : ''}>${'★'.repeat(n)}${'☆'.repeat(5 - n)}</option>`).join('')}</select>`;
 const reviewHtml = (r, st, canReport) => `<div class="review">
-  <div><b>${esc(r.author)}</b> <span class="stars">${starStr(r.stars)}</span> ${r.sample ? '<span class="tag">Sample</span>' : '<span class="tag paid">✓ Verified attendee</span>'}</div>
+  <div><b>${esc(r.author)}</b> <span class="stars">${starStr(r.stars)}</span> ${r.sample ? `<span class="tag">${T('Sample')}</span>` : `<span class="tag paid">${T('✓ Verified attendee')}</span>`}</div>
   ${r.class_title ? `<div class="meta">${esc(r.class_title)}${r.created_at ? ' · ' + fmtDate(r.created_at) : ''}</div>` : ''}
   <div style="margin-top:4px">${esc(r.body)}</div>
-  ${r.reply ? `<div class="reply"><b>Reply from ${esc(st.name)}</b><div>${esc(r.reply)}</div></div>` : ''}
-  ${canReport && r.id ? `<a class="lnk rep" data-report="review" data-id="${r.id}">Report</a>` : ''}</div>`;
+  ${r.reply ? `<div class="reply"><b>${T('Reply from {name}', { name: esc(st.name) })}</b><div>${esc(r.reply)}</div></div>` : ''}
+  ${canReport && r.id ? `<a class="lnk rep" data-report="review" data-id="${r.id}">${T('Report')}</a>` : ''}</div>`;
 
 function reviewFormHtml(st) {
-  if (!user) return `<div class="panel"><div class="label">Been to a class here?</div><p class="meta" style="margin:0 0 10px">Log in to share your experience. You can review a class after you've attended it.</p><button class="btn" data-login>Log in</button></div>`;
+  if (!user) return `<div class="panel"><div class="label">${T('Been to a class here?')}</div><p class="meta" style="margin:0 0 10px">${T("Log in to share your experience. You can review a class after you've attended it.")}</p><button class="btn" data-login>${T('Log in')}</button></div>`;
   if (!profile || profile.role !== 'parent') return '';
   const done = [...new Set(pastBookings.filter(b => b.studio_id === st.id && b.class_id).map(b => b.class_id))].filter(id => classes.some(c => c.id === id));
-  if (!done.length) return `<div class="panel"><div class="label">Leave a review</div><p class="meta" style="margin:0">You can review a class once you've attended it. After your class, come back here to tell other parents how it went.</p></div>`;
+  if (!done.length) return `<div class="panel"><div class="label">${T('Leave a review')}</div><p class="meta" style="margin:0">${T("You can review a class once you've attended it. After your class, come back here to tell other parents how it went.")}</p></div>`;
   const mine = id => reviews.find(r => r.user_id === user.id && r.class_id === id);
   const m = mine(done[0]) || {};
-  return `<div class="panel"><div class="label">Leave a review</div>
-    <select id="rvClass">${done.map(id => `<option value="${id}">${esc(classes.find(c => c.id === id).title)}${mine(id) ? ' (update your review)' : ''}</option>`).join('')}</select>
-    <div class="two"><div><div class="label">Overall</div>${starSel('rvStars', m.stars || 5)}</div><div><div class="label">Instructor</div>${starSel('rvInstr', m.instructor_stars || 5)}</div></div>
-    <div class="two"><div><div class="label">Cleanliness</div>${starSel('rvClean', m.clean_stars || 5)}</div><div><div class="label">Value</div>${starSel('rvValue', m.value_stars || 5)}</div></div>
-    <textarea id="rvText" rows="3" maxlength="1000" placeholder="What did your little one think?">${esc(m.body || '')}</textarea>
-    <button class="btn" data-postreview>Post review</button></div>`;
+  return `<div class="panel"><div class="label">${T('Leave a review')}</div>
+    <select id="rvClass">${done.map(id => `<option value="${id}">${esc(classes.find(c => c.id === id).title)}${mine(id) ? T(' (update your review)') : ''}</option>`).join('')}</select>
+    <div class="two"><div><div class="label">${T('Overall')}</div>${starSel('rvStars', m.stars || 5)}</div><div><div class="label">${T('Instructor')}</div>${starSel('rvInstr', m.instructor_stars || 5)}</div></div>
+    <div class="two"><div><div class="label">${T('Cleanliness')}</div>${starSel('rvClean', m.clean_stars || 5)}</div><div><div class="label">${T('Value')}</div>${starSel('rvValue', m.value_stars || 5)}</div></div>
+    <textarea id="rvText" rows="3" maxlength="1000" placeholder="${T('What did your little one think?')}">${esc(m.body || '')}</textarea>
+    <button class="btn" data-postreview>${T('Post review')}</button></div>`;
 }
 function prefillReview() {
   const sel = $('#rvClass'); if (!sel) return;
@@ -647,7 +734,7 @@ $('#view-studio').addEventListener('change', e => { if (e.target.id === 'rvClass
 
 function renderStudio() {
   const st = studioByName(currentStudio), el = $('#view-studio');
-  if (!st) { el.innerHTML = '<button class="back" data-back>← Back</button><div class="empty">Studio not found</div>'; return; }
+  if (!st) { el.innerHTML = `<button class="back" data-back>${T('← Back')}</button><div class="empty">${T('Studio not found')}</div>`; return; }
   const cs = classes.filter(c => c.studio_id === st.id);
   const cats = [...new Set(cs.map(c => c.cat))], hoods = [...new Set(cs.map(c => c.hood))];
   const h = hash(st.name), sample = st.owner_id === null;
@@ -666,90 +753,90 @@ function renderStudio() {
   });
   const c0 = CATS[cats[0]] || CATS.all;
   const photos = studioPhotos.filter(p => p.studio_id === st.id);
-  const cat3 = [['Instructor', avgOf(real, r => r.instructor_stars)], ['Cleanliness', avgOf(real, r => r.clean_stars)], ['Value', avgOf(real, r => r.value_stars)]].filter(x => x[1] != null);
+  const cat3 = [[T('Instructor'), avgOf(real, r => r.instructor_stars)], [T('Cleanliness'), avgOf(real, r => r.clean_stars)], [T('Value'), avgOf(real, r => r.value_stars)]].filter(x => x[1] != null);
   el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center"><button class="back" data-back>← Back</button><button class="back" data-share>🔗 Share</button></div>
+    <div style="display:flex;justify-content:space-between;align-items:center"><button class="back" data-back>${T('← Back')}</button><button class="back" data-share>${T('🔗 Share')}</button></div>
     <div class="banner" style="background:${c0.color}">
       <div class="big">${c0.emoji}</div>
       <div><h1>${esc(st.name)}</h1>
-        <div class="meta">${all.length ? `<span class="stars">${starStr(avg)}</span> ${avg.toFixed(1)} (${all.length} review${all.length > 1 ? 's' : ''})` : 'New on LittlePass'}</div>
+        <div class="meta">${all.length ? `<span class="stars">${starStr(avg)}</span> ${avg.toFixed(1)} (${T(all.length > 1 ? '{n} reviews' : '{n} review', { n: all.length })})` : T('New on LittlePass')}</div>
         <div class="meta">📍 ${hoods.length ? esc(hoods.join(' & ')) : 'San Diego'}</div></div>
     </div>
-    <div class="panel"><div class="label">About</div><p style="margin:0">${esc(st.blurb || 'A LittlePass partner studio.')}</p>
-      <div class="tags">${cats.map(c => `<span class="tag">${CATS[c].emoji} ${CATS[c].label}</span>`).join('')}</div></div>
-    ${cs.length ? `<div class="panel"><div class="label">Where</div>${[...new Map(cs.map(c => { const l = locByClass(c.id); return [l ? 'a:' + l.address : 'h:' + c.hood + (c.has_address ? '!' : ''), { c, l }]; })).values()].map(({ c, l }) =>
+    <div class="panel"><div class="label">${T('About')}</div><p style="margin:0">${st.blurb ? esc(st.blurb) : T('A LittlePass partner studio.')}</p>
+      <div class="tags">${cats.map(c => `<span class="tag">${CATS[c].emoji} ${T(CATS[c].label)}</span>`).join('')}</div></div>
+    ${cs.length ? `<div class="panel"><div class="label">${T('Where')}</div>${[...new Map(cs.map(c => { const l = locByClass(c.id); return [l ? 'a:' + l.address : 'h:' + c.hood + (c.has_address ? '!' : ''), { c, l }]; })).values()].map(({ c, l }) =>
       l ? `<div style="margin:4px 0">📍 ${esc(l.address)}<div class="meta">🧭 ${dirLinks(l)}</div></div>`
-        : `<div style="margin:4px 0">📍 ${esc(c.hood)}${c.has_address ? '<div class="meta">🔒 Exact address shared after you book</div>' : ''}</div>`).join('')}</div>` : ''}
-    ${cs.length ? `<div class="panel"><div class="label">Classes</div>${cs.map(c => `<div style="padding:8px 0;border-top:1px solid var(--line)"><b>${esc(c.title)}</b> <span class="meta">· ${ageText(c.age_min, c.age_max)} · ${(LEVELS[c.level] || '').replace(/^\S+\s/, '')}</span>${c.description ? `<div class="meta">${esc(c.description.length > 110 ? c.description.slice(0, 110) + '…' : c.description)}</div>` : ''}<a class="lnk" style="font-size:13px" data-details="${c.id}">Details</a></div>`).join('')}</div>` : ''}
-    ${photos.length ? `<div class="label" style="margin-top:20px">Photos</div><div class="photos real">${photos.map(p => `<img class="photo" loading="lazy" alt="${esc(p.caption || st.name)}" src="${photoUrl(p)}" data-photo="${p.id}">`).join('')}</div>`
-      : sample && cats.length ? `<div class="label" style="margin-top:20px">Photos</div><div class="photos">${cats.concat(cats, cats).slice(0, 3).map(c => `<div class="photo" style="background:${CATS[c].color}">${CATS[c].emoji}</div>`).join('')}</div><div class="meta" style="margin-top:4px">Placeholder images for this demo partner.</div>` : ''}
-    <h2 style="margin:24px 0 0">Schedule: next ${HORIZON} days</h2>${sched || '<div class="empty">No classes scheduled</div>'}
-    <h2 style="margin:28px 0 8px">What parents are saying</h2>
+        : `<div style="margin:4px 0">📍 ${esc(c.hood)}${c.has_address ? `<div class="meta">${T('🔒 Exact address shared after you book')}</div>` : ''}</div>`).join('')}</div>` : ''}
+    ${cs.length ? `<div class="panel"><div class="label">${T('Classes')}</div>${cs.map(c => `<div style="padding:8px 0;border-top:1px solid var(--line)"><b>${esc(c.title)}</b> <span class="meta">· ${ageText(c.age_min, c.age_max)} · ${T(LEVELS[c.level] || '').replace(/^\S+\s/, '')}</span>${c.description ? `<div class="meta">${esc(c.description.length > 110 ? c.description.slice(0, 110) + '…' : c.description)}</div>` : ''}<a class="lnk" style="font-size:13px" data-details="${c.id}">${T('Details')}</a></div>`).join('')}</div>` : ''}
+    ${photos.length ? `<div class="label" style="margin-top:20px">${T('Photos')}</div><div class="photos real">${photos.map(p => `<img class="photo" loading="lazy" alt="${esc(p.caption || st.name)}" src="${photoUrl(p)}" data-photo="${p.id}">`).join('')}</div>`
+      : sample && cats.length ? `<div class="label" style="margin-top:20px">${T('Photos')}</div><div class="photos">${cats.concat(cats, cats).slice(0, 3).map(c => `<div class="photo" style="background:${CATS[c].color}">${CATS[c].emoji}</div>`).join('')}</div><div class="meta" style="margin-top:4px">${T('Placeholder images for this demo partner.')}</div>` : ''}
+    <h2 style="margin:24px 0 0">${T('Schedule: next {n} days', { n: HORIZON })}</h2>${sched || `<div class="empty">${T('No classes scheduled')}</div>`}
+    <h2 style="margin:28px 0 8px">${T('What parents are saying')}</h2>
     ${all.length ? `<div class="panel" style="margin-top:0"><div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-        <div style="text-align:center"><div style="font-size:38px;font-weight:800;line-height:1">${avg.toFixed(1)}</div><div class="stars">${starStr(avg)}</div><div class="meta">${all.length} review${all.length > 1 ? 's' : ''}</div></div>
+        <div style="text-align:center"><div style="font-size:38px;font-weight:800;line-height:1">${avg.toFixed(1)}</div><div class="stars">${starStr(avg)}</div><div class="meta">${T(all.length > 1 ? '{n} reviews' : '{n} review', { n: all.length })}</div></div>
         <div style="flex:1;min-width:160px">${cat3.map(([l, v]) => `<div class="catrow"><span>${l}</span><div class="fillbar" style="flex:1;margin:0 10px"><div style="width:${v / 5 * 100}%"></div></div><b>${v.toFixed(1)}</b></div>`).join('')}</div></div>
-      ${reviewedClasses.length > 1 ? `<div class="chips" style="margin-top:12px"><button class="chip ${rvClassFilter === 'all' ? 'on' : ''}" data-rvclass="all">All classes</button>${reviewedClasses.map(c => `<button class="chip ${rvClassFilter === c.id ? 'on' : ''}" data-rvclass="${c.id}">${esc(c.title)}</button>`).join('')}</div>` : ''}
+      ${reviewedClasses.length > 1 ? `<div class="chips" style="margin-top:12px"><button class="chip ${rvClassFilter === 'all' ? 'on' : ''}" data-rvclass="all">${T('All classes')}</button>${reviewedClasses.map(c => `<button class="chip ${rvClassFilter === c.id ? 'on' : ''}" data-rvclass="${c.id}">${esc(c.title)}</button>`).join('')}</div>` : ''}
       <div style="margin-top:8px">${shown.map(r => reviewHtml(r, st, !!user && r.user_id !== user.id)).join('')}</div>
-      ${seed.length && rvClassFilter === 'all' ? '<div class="meta" style="margin-top:8px"><i>Sample reviews for this demo partner.</i></div>' : ''}</div>`
-      : '<div class="panel" style="margin-top:0"><p class="meta" style="margin:0">No reviews yet. Parents who attend a class here can leave the first one.</p></div>'}
+      ${seed.length && rvClassFilter === 'all' ? `<div class="meta" style="margin-top:8px"><i>${T('Sample reviews for this demo partner.')}</i></div>` : ''}</div>`
+      : `<div class="panel" style="margin-top:0"><p class="meta" style="margin:0">${T('No reviews yet. Parents who attend a class here can leave the first one.')}</p></div>`}
     ${reviewFormHtml(st)}`;
 }
 async function shareStudio() {
   // the studio's own page has a proper link preview (photo, classes, rating)
-  const url = `${location.origin}/studios/${slugify(currentStudio)}`, title = `${currentStudio} on LittlePass`;
+  const url = `${location.origin}/studios/${slugify(currentStudio)}`, title = T('{name} on LittlePass', { name: currentStudio });
   const st = studioByName(currentStudio); if (st) track('share', st.id);
   try {
     if (navigator.share) { await navigator.share({ title, url }); return; }
-    await navigator.clipboard.writeText(url); toast('Link copied 🔗');
+    await navigator.clipboard.writeText(url); toast(T('Link copied 🔗'));
   } catch (e) { /* share dialog dismissed */ }
 }
 async function postReview() {
-  if (!user) return openAuth('login', 'Log in to leave a review.');
+  if (!user) return openAuth('login', T('Log in to leave a review.'));
   const { error } = await sb.rpc('post_review', { p_class: $('#rvClass').value, p_stars: +$('#rvStars').value, p_instructor: +$('#rvInstr').value,
     p_clean: +$('#rvClean').value, p_value: +$('#rvValue').value, p_body: $('#rvText').value });
-  if (error) return toast(error.message);
-  await loadPublic(); renderStudio(); toast('Thanks for your review 💛');
+  if (error) return toast(tx(error.message));
+  await loadPublic(); renderStudio(); toast(T('Thanks for your review 💛'));
 }
 function openPhoto(id) {
   const p = studioPhotos.find(x => x.id === id); if (!p) return;
   openModal(`<img src="${photoUrl(p)}" alt="" style="width:100%;border-radius:14px;display:block">
     ${p.caption ? `<p style="margin:10px 0 0">${esc(p.caption)}</p>` : ''}
-    <div class="actions"><button class="btn ghost" data-close>Close</button>
-    ${isAdmin() ? `<button class="btn ghost danger" data-adminrmphoto="${p.id}">Remove photo</button>` : user ? `<button class="btn ghost" data-report="photo" data-id="${p.id}">Report</button>` : ''}</div>`);
+    <div class="actions"><button class="btn ghost" data-close>${T('Close')}</button>
+    ${isAdmin() ? `<button class="btn ghost danger" data-adminrmphoto="${p.id}">Remove photo</button>` : user ? `<button class="btn ghost" data-report="photo" data-id="${p.id}">${T('Report')}</button>` : ''}</div>`);
 }
 async function doReport(kind, id) {
-  if (!user) return openAuth('login', 'Log in to report content.');
-  const reason = prompt('What\'s wrong with this? (optional)');
+  if (!user) return openAuth('login', T('Log in to report content.'));
+  const reason = prompt(T("What's wrong with this? (optional)"));
   if (reason === null) return;
   const { error } = await sb.rpc('report_content', { p_kind: kind, p_target: id, p_reason: reason });
-  if (error) return toast(error.message);
-  closeModal(); toast('Thanks. We\'ll take a look.');
+  if (error) return toast(tx(error.message));
+  closeModal(); toast(T("Thanks. We'll take a look."));
 }
 
 // ---------- Views ----------
 function pastCard(b) {
   const c = classes.find(x => x.id === b.class_id), st = studioById(b.studio_id), cat = CATS[c ? c.cat : 'all'];
   const rv = reviews.find(r => r.user_id === user.id && r.class_id === b.class_id);
-  const date = new Date(b.session_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  const date = new Date(b.session_date + 'T00:00:00').toLocaleDateString(LOCALE(), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
   return `<div class="card">
     <div class="emoji" style="background:${cat.color}">${cat.emoji}</div>
     <div>
       <h3>${esc(b.class_title)}</h3>
       <div class="meta">${st ? `<a class="lnk" data-studio="${esc(st.name)}">${esc(st.name)}</a><br>` : ''}🗓 ${date} · ${t12(b.session_time)}</div>
-      <div class="tags"><span class="tag">👶 ${esc(b.attendee_name)}</span>${rv ? `<span class="tag paid">✓ Reviewed ${starStr(rv.stars)}</span>` : ''}</div>
+      <div class="tags"><span class="tag">👶 ${esc(b.attendee_name)}</span>${rv ? `<span class="tag paid">${T('✓ Reviewed')} ${starStr(rv.stars)}</span>` : ''}</div>
     </div>
     <div class="right"><div class="cost">⭐ ${b.credits}</div>
-      ${st && c ? `<button class="btn ${rv ? 'ghost' : ''}" data-goreview="${esc(st.name)}" data-cid="${c.id}">${rv ? 'Edit review' : 'Review'}</button>` : ''}</div></div>`;
+      ${st && c ? `<button class="btn ${rv ? 'ghost' : ''}" data-goreview="${esc(st.name)}" data-cid="${c.id}">${rv ? T('Edit review') : T('Review')}</button>` : ''}</div></div>`;
 }
 function renderBookings() {
-  if (!user) { $('#bookingList').innerHTML = `<div class="empty">Log in to see your classes.<br><button class="btn" style="margin-top:12px" data-login>Log in</button></div>`; return; }
+  if (!user) { $('#bookingList').innerHTML = `<div class="empty">${T('Log in to see your classes.')}<br><button class="btn" style="margin-top:12px" data-login>${T('Log in')}</button></div>`; return; }
   const past = pastBookings.slice().sort((x, y) => (y.session_date + y.session_time).localeCompare(x.session_date + x.session_time));
-  const seg = `<div class="seg"><button data-bkview="upcoming" class="${bookView === 'upcoming' ? 'on' : ''}">Upcoming (${myBookings.length + myWaitlist.length})</button><button data-bkview="past" class="${bookView === 'past' ? 'on' : ''}">Past (${past.length})</button></div>`;
+  const seg = `<div class="seg"><button data-bkview="upcoming" class="${bookView === 'upcoming' ? 'on' : ''}">${T('Upcoming ({n})', { n: myBookings.length + myWaitlist.length })}</button><button data-bkview="past" class="${bookView === 'past' ? 'on' : ''}">${T('Past ({n})', { n: past.length })}</button></div>`;
   if (bookView === 'past') {
     const studiosN = new Set(past.map(b => b.studio_id)).size;
     $('#bookingList').innerHTML = seg + (past.length
-      ? `<div class="meta" style="margin:4px 0 10px">${past.length} class${past.length === 1 ? '' : 'es'} attended at ${studiosN} studio${studiosN === 1 ? '' : 's'}</div><div class="grid">${past.map(pastCard).join('')}</div>`
-      : `<div class="empty">No past classes yet.<br>They'll show up here after you attend.</div>`);
+      ? `<div class="meta" style="margin:4px 0 10px">${T(past.length === 1 ? '{n} class attended' : '{n} classes attended', { n: past.length })} · ${T(studiosN === 1 ? '{n} studio' : '{n} studios', { n: studiosN })}</div><div class="grid">${past.map(pastCard).join('')}</div>`
+      : `<div class="empty">${T('No past classes yet.')}<br>${T("They'll show up here after you attend.")}</div>`);
     return;
   }
   const list = [
@@ -758,7 +845,7 @@ function renderBookings() {
   ].sort((x, y) => x.date - y.date || timeVal(x.time) - timeVal(y.time));
   $('#bookingList').innerHTML = seg + (list.length
     ? `<div class="grid">${list.map(s => card(s, 'booking')).join('')}</div>`
-    : `<div class="empty">No upcoming classes.<br><button class="btn" style="margin-top:12px" data-goexplore>Find a class</button></div>`);
+    : `<div class="empty">${T('No upcoming classes.')}<br><button class="btn" style="margin-top:12px" data-goexplore>${T('Find a class')}</button></div>`);
 }
 const subActive = () => !!(profile && ['active', 'trialing', 'past_due'].includes(profile.plan_status));
 function renderPlans() {
@@ -766,37 +853,37 @@ function renderPlans() {
   if (subActive()) {
     const end = profile.plan_period_end ? fmtDate(profile.plan_period_end) : '';
     banner = `<div class="notice ${profile.plan_status === 'past_due' ? 'rej' : 'pend'}" style="grid-column:1/-1;margin:0;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap">
-      <div>${profile.plan_status === 'past_due' ? '⚠️ <b>Your last payment failed.</b> Please update your card to keep your credits coming.'
-        : profile.cancel_at_period_end ? `Your plan <b>cancels on ${end}</b>. Unused credits expire then.` : `✅ Your plan renews on <b>${end}</b>. Unused credits roll over, up to double your monthly credits. Upgrade anytime and get the extra credits right away. Downgrades start at your next renewal.`}</div>
-      <button class="btn" data-manage>Manage subscription</button></div>`;
+      <div>${profile.plan_status === 'past_due' ? T('⚠️ <b>Your last payment failed.</b> Please update your card to keep your credits coming.')
+        : profile.cancel_at_period_end ? T('Your plan <b>cancels on {date}</b>. Unused credits expire then.', { date: end }) : T('✅ Your plan renews on <b>{date}</b>. Unused credits roll over, up to double your monthly credits. Upgrade anytime and get the extra credits right away. Downgrades start at your next renewal.', { date: end })}</div>
+      <button class="btn" data-manage>${T('Manage subscription')}</button></div>`;
   }
   const isParent = !user || (profile && profile.role === 'parent');
   $('#planList').innerHTML = banner + planList().map(p => {
     const cur = subActive() && profile.plan === p.id;
     let btn = '';
     if (!isParent) btn = '';
-    else if (cur) btn = `<button class="btn ghost" disabled>✓ Current plan</button>`;
-    else if (subActive()) { const curP = planList().find(x => x.id === profile.plan); btn = `<button class="btn ghost" data-manage>${curP && p.price > curP.price ? 'Upgrade' : 'Switch plan'}</button>`; }
-    else if (!p.ready) btn = `<button class="btn ghost" disabled>Coming soon</button>`;
-    else btn = `<button class="btn" data-plan="${p.id}">${user ? 'Subscribe' : 'Log in to subscribe'}</button>`;
+    else if (cur) btn = `<button class="btn ghost" disabled>${T('✓ Current plan')}</button>`;
+    else if (subActive()) { const curP = planList().find(x => x.id === profile.plan); btn = `<button class="btn ghost" data-manage>${curP && p.price > curP.price ? T('Upgrade') : T('Switch plan')}</button>`; }
+    else if (!p.ready) btn = `<button class="btn ghost" disabled>${T('Coming soon')}</button>`;
+    else btn = `<button class="btn" data-plan="${p.id}">${user ? T('Subscribe') : T('Log in to subscribe')}</button>`;
     return `<div class="plan ${p.pop ? 'pop' : ''}">
-      ${p.pop ? '<div class="badge">Most popular</div>' : ''}
+      ${p.pop ? `<div class="badge">${T('Most popular')}</div>` : ''}
       <h3>${esc(p.name)}</h3>
-      <div class="price">$${p.price}<small>/month</small></div>
-      <div class="meta">⭐ ${p.credits} credits every month</div>
-      <ul>${p.perks.map(x => `<li>${esc(x)}</li>`).join('')}</ul>${btn}</div>`;
+      <div class="price">$${p.price}<small>${T('/month')}</small></div>
+      <div class="meta">${T('⭐ {n} credits every month', { n: p.credits })}</div>
+      <ul>${p.perks.map(x => `<li>${esc(T(x))}</li>`).join('')}</ul>${btn}</div>`;
   }).join('');
 }
 // ---------- Your data: download everything, or delete the account ----------
 function yourDataPanel() {
   const canDelete = profile && profile.role !== 'admin';
-  return `<div class="panel"><div class="label">Your data</div>
-    <p class="meta" style="margin:0 0 10px">You own your information. Download a copy any time${canDelete ? ', or delete your account' : ''}.</p>
-    <button class="btn ghost" data-downloaddata>⬇️ Download my data</button>
-    ${canDelete ? ' <button class="btn ghost danger" data-opendelete>Delete my account</button>' : ''}</div>`;
+  return `<div class="panel"><div class="label">${T('Your data')}</div>
+    <p class="meta" style="margin:0 0 10px">${canDelete ? T('You own your information. Download a copy any time, or delete your account.') : T('You own your information. Download a copy any time.')}</p>
+    <button class="btn ghost" data-downloaddata>${T('⬇️ Download my data')}</button>
+    ${canDelete ? ` <button class="btn ghost danger" data-opendelete>${T('Delete my account')}</button>` : ''}</div>`;
 }
 async function downloadMyData() {
-  toast('Preparing your data…');
+  toast(T('Preparing your data…'));
   const out = { exported_at: new Date().toISOString(), email: user.email, account_created: user.created_at };
   const q = async (key, promise) => { const { data, error } = await promise; out[key] = error ? { error: error.message } : data; return data; };
   await q('profile', sb.from('profiles').select('*').eq('id', user.id));
@@ -828,37 +915,37 @@ async function downloadMyData() {
   link.href = URL.createObjectURL(blob); link.download = `littlepass-my-data-${fmt(new Date())}.json`;
   document.body.appendChild(link); link.click(); link.remove();
   setTimeout(() => URL.revokeObjectURL(link.href), 4000);
-  toast('Your data was downloaded ✓');
+  toast(T('Your data was downloaded ✓'));
 }
 function openDeleteAccount() {
   const studio = profile && profile.role === 'studio';
-  openModal(`<h2>Delete your account?</h2><p style="margin:0 0 8px"><b>This can't be undone.</b></p>
+  openModal(`<h2>${T('Delete your account?')}</h2><p style="margin:0 0 8px"><b>${T("This can't be undone.")}</b></p>
     <ul style="margin:0 0 10px;padding-left:20px;font-size:14px;line-height:1.5">
       ${studio
         ? `<li>Your studio, classes, time slots, photos and contact info will be removed and hidden from parents.</li>
            <li>You can only close your account when you have <b>no upcoming bookings</b> and have been <b>paid everything you've earned</b>.</li>
            <li>We keep anonymised booking and payout records for tax and accounting.</li>`
-        : `<li>Your <b>subscription ends immediately</b> and any unused credits${profile && profile.credits ? ` (⭐ ${profile.credits})` : ''} are lost, with no refund.</li>
-           <li>Your upcoming bookings are cancelled.</li>
-           <li>Your children's details and account information are deleted.</li>
-           <li>Reviews you wrote stay, without your name. We keep anonymised booking records for tax and accounting.</li>`}
+        : `<li>${T('Your <b>subscription ends immediately</b> and any unused credits{n} are lost, with no refund.', { n: profile && profile.credits ? ` (⭐ ${profile.credits})` : '' })}</li>
+           <li>${T('Your upcoming bookings are cancelled.')}</li>
+           <li>${T("Your children's details and account information are deleted.")}</li>
+           <li>${T('Reviews you wrote stay, without your name. We keep anonymised booking records for tax and accounting.')}</li>`}
     </ul>
-    <p class="meta" style="margin:0 0 8px">Want a copy first? Close this and tap <b>Download my data</b>.</p>
-    <div class="label">Type DELETE to confirm</div><input id="delConfirm" autocomplete="off" autocapitalize="characters" placeholder="DELETE">
+    <p class="meta" style="margin:0 0 8px">${T('Want a copy first? Close this and tap <b>Download my data</b>.')}</p>
+    <div class="label">${T('Type DELETE to confirm')}</div><input id="delConfirm" autocomplete="off" autocapitalize="characters" placeholder="DELETE">
     <div class="err" id="delErr"></div>
-    <div class="actions"><button class="btn ghost" data-close>Keep my account</button><button class="btn" style="background:#c0392b" data-confirmdelete>Delete everything</button></div>`);
+    <div class="actions"><button class="btn ghost" data-close>${T('Keep my account')}</button><button class="btn" style="background:#c0392b" data-confirmdelete>${T('Delete everything')}</button></div>`);
 }
 async function confirmDeleteAccount() {
   const err = $('#delErr'), btn = $('[data-confirmdelete]');
-  if ($('#delConfirm').value.trim() !== 'DELETE') { err.textContent = 'Please type DELETE (in capitals) to confirm.'; return; }
-  btn.disabled = true; btn.textContent = 'Deleting…'; err.textContent = '';
+  if ($('#delConfirm').value.trim() !== 'DELETE') { err.textContent = T('Please type DELETE (in capitals) to confirm.'); return; }
+  btn.disabled = true; btn.textContent = T('Deleting…'); err.textContent = '';
   try { await callFunction('delete-account', { confirm: 'DELETE' }); }
-  catch (e) { err.textContent = e.message; btn.disabled = false; btn.textContent = 'Delete everything'; return; }
+  catch (e) { err.textContent = tx(e.message); btn.disabled = false; btn.textContent = T('Delete everything'); return; }
   closeModal();
   try { await sb.auth.signOut({ scope: 'local' }); } catch (e) {}
   user = null; profile = null; kids = []; myBookings = []; myWaitlist = []; studioBookings = []; pastBookings = [];
   await loadPublic(); buildSessions(); renderAll(); showTab('explore');
-  toast('Your account was deleted. Take care! 🐣');
+  toast(T('Your account was deleted. Take care! 🐣'));
 }
 async function callFunction(name, body) {
   const { data, error } = await sb.functions.invoke(name, { body });
@@ -870,58 +957,59 @@ async function callFunction(name, body) {
   return data;
 }
 async function startCheckout(planId) {
-  if (!user) return openAuth('login', 'Log in or sign up to subscribe.');
+  if (!user) return openAuth('login', T('Log in or sign up to subscribe.'));
   track('start_checkout');
-  toast('Opening secure checkout…');
+  toast(T('Opening secure checkout…'));
   try { const d = await callFunction('create-checkout', { plan: planId }); location.href = d.url; }
-  catch (e) { toast(e.message); }
+  catch (e) { toast(tx(e.message)); }
 }
 async function openPortal() {
-  toast('Opening your subscription…');
+  toast(T('Opening your subscription…'));
   try { const d = await callFunction('billing-portal', {}); location.href = d.url; }
-  catch (e) { toast(e.message); }
+  catch (e) { toast(tx(e.message)); }
 }
 async function afterCheckout(result) {
   showTab('plans');
-  if (result === 'cancel') return toast('Checkout cancelled. No charge was made.');
+  if (result === 'cancel') return toast(T('Checkout cancelled. No charge was made.'));
   if (result === 'portal') return;
-  toast('Payment received! Adding your credits…');
+  toast(T('Payment received! Adding your credits…'));
   for (let i = 0; i < 12; i++) {
     await new Promise(r => setTimeout(r, 2000));
     if (!user) continue;
     await loadPrivate(); renderAll();
-    if (profile && profile.plan_status === 'active' && profile.credits > 0) { toast(`🎉 You're subscribed! ⭐ ${profile.credits} credits added.`); return; }
+    if (profile && profile.plan_status === 'active' && profile.credits > 0) { toast(T("🎉 You're subscribed! ⭐ {n} credits added.", { n: profile.credits })); return; }
   }
-  toast('Still processing. Your credits will appear in a minute.');
+  toast(T('Still processing. Your credits will appear in a minute.'));
 }
 function renderProfile() {
   const el = $('#view-profile');
   if (!user) {
-    el.innerHTML = `<h2 style="margin-top:24px">My family</h2><div class="panel"><p style="margin-top:0">Log in to add your kids and get class suggestions for their exact age.</p>
-      <button class="btn" data-login>Log in</button> <button class="btn ghost" data-signup>Sign up</button></div>`;
+    el.innerHTML = `<h2 style="margin-top:24px">${T('My family')}</h2><div class="panel"><p style="margin-top:0">${T('Log in to add your kids and get class suggestions for their exact age.')}</p>
+      <button class="btn" data-login>${T('Log in')}</button> <button class="btn ghost" data-signup>${T('Sign up')}</button></div>`;
     return;
   }
   const isStudio = profile && profile.role === 'studio';
-  el.innerHTML = `<h2 style="margin-top:24px">${isStudio ? 'My account' : 'My family'}</h2>
-    <div class="panel"><div class="label">Account</div>
-      ${editName ? `<input id="myName" maxlength="60" value="${esc(profile ? profile.display_name || '' : '')}" placeholder="Your name">
-        <div class="meta" style="margin:-4px 0 10px">Studios see this name on your bookings.</div>
-        <button class="btn" data-savename>Save</button> <button class="btn ghost" data-editname="0">Cancel</button>`
-      : `<div><b>${esc(profile ? profile.display_name : '')}</b> · ${isStudio ? '🏢 Studio' : '👶 Parent'} · <a class="lnk" data-editname="1">Edit name</a></div>
+  el.innerHTML = `<h2 style="margin-top:24px">${isStudio ? T('My account') : T('My family')}</h2>
+    <div class="panel"><div class="label">${T('Account')}</div>
+      ${editName ? `<input id="myName" maxlength="60" value="${esc(profile ? profile.display_name || '' : '')}" placeholder="${T('Your name')}">
+        <div class="meta" style="margin:-4px 0 10px">${T('Studios see this name on your bookings.')}</div>
+        <button class="btn" data-savename>${T('Save')}</button> <button class="btn ghost" data-editname="0">${T('Cancel')}</button>`
+      : `<div><b>${esc(profile ? profile.display_name : '')}</b> · ${isStudio ? T('🏢 Studio') : T('👶 Parent')} · <a class="lnk" data-editname="1">${T('Edit name')}</a></div>
       <div class="meta" style="margin-bottom:12px">${esc(user.email)}</div>
-      <button class="btn ghost" data-logout>Log out</button>`}</div>
+      ${isStudio ? '' : `<div class="meta" style="margin-bottom:10px">${T('Language')}: <a class="lnk" data-lang="en">${LANG === 'en' ? '<b>English</b>' : 'English'}</a> · <a class="lnk" data-lang="es">${LANG === 'es' ? '<b>Español</b>' : 'Español'}</a></div>`}
+      <button class="btn ghost" data-logout>${T('Log out')}</button>`}</div>
     ${isStudio ? '' : `<div class="panel">
-      <div class="label">Add a child</div><input id="kidName" placeholder="Name">
-      <div class="label">Birthday</div><input id="kidBday" type="date">
-      <button class="btn" data-addkid>Add child</button></div>
-    <div class="panel"><div class="label">Your kids</div>${kids.length ? kids.map(k => {
+      <div class="label">${T('Add a child')}</div><input id="kidName" placeholder="${T('Name')}">
+      <div class="label">${T('Birthday')}</div><input id="kidBday" type="date">
+      <button class="btn" data-addkid>${T('Add child')}</button></div>
+    <div class="panel"><div class="label">${T('Your kids')}</div>${kids.length ? kids.map(k => {
       const m = monthsOld(k.birthday);
       if (editKid === k.id) return `<div class="kid" style="flex-wrap:wrap"><input id="ekName" maxlength="60" value="${esc(k.name)}" style="flex:1 1 140px;margin:0">
         <input id="ekBday" type="date" value="${esc(k.birthday)}" style="flex:1 1 140px;margin:0">
-        <button class="btn" data-savekid="${k.id}">Save</button><button class="btn ghost" data-editkid="">Cancel</button></div>`;
-      return `<div class="kid"><span style="font-size:24px">👶</span><div><b>${esc(k.name)}</b><div class="meta">${m < 24 ? m + ' months' : Math.floor(m / 12) + ' years'} old</div></div>
-        <span style="margin-left:auto;display:flex;gap:6px"><button class="btn ghost" data-editkid="${k.id}">Edit</button><button class="btn ghost" data-rmkid="${k.id}">Remove</button></span></div>`;
-    }).join('') : `<p class="meta">Add your child and we'll show classes for their exact age.</p>`}</div>
+        <button class="btn" data-savekid="${k.id}">${T('Save')}</button><button class="btn ghost" data-editkid="">${T('Cancel')}</button></div>`;
+      return `<div class="kid"><span style="font-size:24px">👶</span><div><b>${esc(k.name)}</b><div class="meta">${m < 24 ? T('{n} months old', { n: m }) : T('{n} years old', { n: Math.floor(m / 12) })}</div></div>
+        <span style="margin-left:auto;display:flex;gap:6px"><button class="btn ghost" data-editkid="${k.id}">${T('Edit')}</button><button class="btn ghost" data-rmkid="${k.id}">${T('Remove')}</button></span></div>`;
+    }).join('') : `<p class="meta">${T("Add your child and we'll show classes for their exact age.")}</p>`}</div>
     ${creditHistoryPanel()}`}
     ${yourDataPanel()}`;
 }
@@ -929,11 +1017,11 @@ function renderProfile() {
 // Every credit in and out: plan payments, bookings, refunds, adjustments
 function creditHistoryPanel() {
   const rows = histAll ? myLedger : myLedger.slice(0, 8);
-  return `<div class="panel"><div class="label">Credit history</div>
-    <div class="meta" style="margin-bottom:4px">Balance now: <b>⭐ ${profile ? profile.credits : 0}</b></div>
-    ${rows.length ? rows.map(l => `<div class="hist"><div><div>${esc(l.reason)}</div><div class="meta">${fmtDate(l.created_at)}</div></div>
-      <b class="${l.delta > 0 ? 'plus' : ''}">${l.delta > 0 ? '+' : ''}${l.delta}</b></div>`).join('') : '<p class="meta">No credit activity yet.</p>'}
-    ${myLedger.length > 8 ? `<button class="btn ghost" style="margin-top:8px" data-histall>${histAll ? 'Show less' : `Show all (${myLedger.length})`}</button>` : ''}</div>`;
+  return `<div class="panel"><div class="label">${T('Credit history')}</div>
+    <div class="meta" style="margin-bottom:4px">${T('Balance now:')} <b>⭐ ${profile ? profile.credits : 0}</b></div>
+    ${rows.length ? rows.map(l => `<div class="hist"><div><div>${esc(tx(l.reason))}</div><div class="meta">${fmtDate(l.created_at)}</div></div>
+      <b class="${l.delta > 0 ? 'plus' : ''}">${l.delta > 0 ? '+' : ''}${l.delta}</b></div>`).join('') : `<p class="meta">${T('No credit activity yet.')}</p>`}
+    ${myLedger.length > 8 ? `<button class="btn ghost" style="margin-top:8px" data-histall>${histAll ? T('Show less') : T('Show all ({n})', { n: myLedger.length })}</button>` : ''}</div>`;
 }
 
 // ---------- Studio area ----------
@@ -1688,7 +1776,8 @@ async function handleClick(e) {
   }
   if (hit('[data-clearfilters]')) { clearFilters(); return; }
   if (hit('[data-goexplore]')) { showTab('explore'); return; }
-  if (hit('[data-logout]')) { await sb.auth.signOut(); profile = null; renderNav(); showTab('explore'); toast('Logged out'); return; }
+  if (hit('[data-logout]')) { await sb.auth.signOut(); profile = null; renderNav(); showTab('explore'); toast(T('Logged out')); return; }
+  if ((el = hit('[data-lang]'))) { setLang(el.dataset.lang); return; }
   if ((el = hit('[data-authmode]'))) { openAuth(el.dataset.authmode, authState.reason); return; }
   if ((el = hit('[data-authrole]'))) { openAuth('signup', authState.reason, el.dataset.authrole); return; }
   if (hit('[data-authgo]')) { authGo(); return; }
@@ -1720,25 +1809,25 @@ async function handleClick(e) {
   if ((el = hit('[data-editname]'))) { editName = el.dataset.editname === '1'; renderProfile(); return; }
   if (hit('[data-savename]')) {
     const name = $('#myName').value.trim();
-    if (!name) return toast('Please enter your name');
+    if (!name) return toast(T('Please enter your name'));
     const { error } = await sb.from('profiles').update({ display_name: name }).eq('id', user.id);
-    if (error) return toast(error.message);
-    editName = false; await loadPrivate(); renderProfile(); toast('Name saved'); return;
+    if (error) return toast(tx(error.message));
+    editName = false; await loadPrivate(); renderProfile(); toast(T('Name saved')); return;
   }
   if ((el = hit('[data-editkid]'))) { editKid = el.dataset.editkid || null; renderProfile(); return; }
   if ((el = hit('[data-savekid]'))) {
     const name = $('#ekName').value.trim(), bday = $('#ekBday').value;
-    if (!name || !bday) return toast('Please add a name and birthday');
+    if (!name || !bday) return toast(T('Please add a name and birthday'));
     const { error } = await sb.from('kids').update({ name, birthday: bday }).eq('id', el.dataset.savekid);
-    if (error) return toast(error.message);
-    editKid = null; await loadPrivate(); renderProfile(); renderFilters(); renderResults(); toast('Saved'); return;
+    if (error) return toast(tx(error.message));
+    editKid = null; await loadPrivate(); renderProfile(); renderFilters(); renderResults(); toast(T('Saved')); return;
   }
   if (hit('[data-addkid]')) {
     const name = $('#kidName').value.trim(), bday = $('#kidBday').value;
-    if (!name || !bday) return toast('Please add a name and birthday');
+    if (!name || !bday) return toast(T('Please add a name and birthday'));
     const { error } = await sb.from('kids').insert({ user_id: user.id, name, birthday: bday });
-    if (error) return toast(error.message);
-    await loadPrivate(); renderProfile(); renderFilters(); toast(`Added ${name} 💛`); return;
+    if (error) return toast(tx(error.message));
+    await loadPrivate(); renderProfile(); renderFilters(); toast(T('Added {name} 💛', { name })); return;
   }
   if ((el = hit('[data-rmkid]'))) {
     await sb.from('kids').delete().eq('id', el.dataset.rmkid);
@@ -1746,37 +1835,37 @@ async function handleClick(e) {
   }
   if ((el = hit('[data-book]'))) {
     if (map) map.closePopup();
-    if (!user) return openAuth('login', 'Log in or sign up to book classes. New accounts start with 10 free credits.');
-    if (profile && profile.role !== 'parent') return toast('Only parent accounts can book classes.');
+    if (!user) return openAuth('login', T('Log in or sign up to book classes. New accounts start with 10 free credits.'));
+    if (profile && profile.role !== 'parent') return toast(T('Only parent accounts can book classes.'));
     const s = SESSIONS.find(x => x.id === el.dataset.book), credits = profile ? profile.credits : 0, enough = credits >= s.credits;
     const late = new Date(`${s.dateStr}T${s.time24}`) - Date.now() < cancelHours * 36e5;
     openModal(`
       <div class="emoji" style="background:${CATS[s.cat].color};margin-bottom:12px">${CATS[s.cat].emoji}</div>
       <h2>${esc(s.title)}</h2>
-      <div class="meta">${esc(s.studio)} · ${esc(s.hood)}<br>${dayName(s.date)} at ${s.time} · ${s.mins} min<br>Ages ${ageText(s.ageMin, s.ageMax)}${s.loc ? `<br>🧭 ${esc(s.loc.address)}` : ''}</div>
-      ${!s.loc && s.hasAddr ? '<p class="meta" style="margin:8px 0 0">🔒 The exact address is shared with you once you book.</p>' : ''}
-      ${(() => { const cl = classById(s.classId); return cl ? `<div class="tags" style="margin:8px 0 0"><span class="tag">${PARENT_STAYS[cl.parent_stays] || ''}</span><span class="tag">${LEVELS[cl.level] || ''}</span></div>${cl.description ? `<p class="meta" style="margin:8px 0 0">${esc(cl.description.length > 160 ? cl.description.slice(0, 160) + '…' : cl.description)} <a class="lnk" data-details="${cl.id}">More</a></p>` : ''}${cl.what_to_bring ? `<p class="meta" style="margin:6px 0 0"><b>Bring:</b> ${esc(cl.what_to_bring)}</p>` : ''}` : ''; })()}
+      <div class="meta">${esc(s.studio)} · ${esc(s.hood)}<br>${T('{day} at {time}', { day: dayName(s.date), time: s.time })} · ${s.mins} min<br>${T('Ages {ages}', { ages: ageText(s.ageMin, s.ageMax) })}${s.loc ? `<br>🧭 ${esc(s.loc.address)}` : ''}</div>
+      ${!s.loc && s.hasAddr ? `<p class="meta" style="margin:8px 0 0">${T('🔒 The exact address is shared with you once you book.')}</p>` : ''}
+      ${(() => { const cl = classById(s.classId); return cl ? `<div class="tags" style="margin:8px 0 0"><span class="tag">${T(PARENT_STAYS[cl.parent_stays] || '')}</span><span class="tag">${T(LEVELS[cl.level] || '')}</span></div>${cl.description ? `<p class="meta" style="margin:8px 0 0">${esc(cl.description.length > 160 ? cl.description.slice(0, 160) + '…' : cl.description)} <a class="lnk" data-details="${cl.id}">${T('More')}</a></p>` : ''}${cl.what_to_bring ? `<p class="meta" style="margin:6px 0 0"><b>${T('Bring:')}</b> ${esc(cl.what_to_bring)}</p>` : ''}` : ''; })()}
       ${whoPicker(s)}
       <p id="bkCost"></p>
-      <p class="meta" style="margin:0 0 4px">${late ? `⚠️ This class starts within ${cancelHours} hours, so this booking <b>can't be cancelled</b> or refunded.` : `Free cancellation up to ${cancelHours} hours before the class starts.`}</p>
-      <div class="actions"><button class="btn ghost" data-close>Not now</button>
-        ${enough ? `<button class="btn" data-confirm="${s.id}">Confirm booking</button>` : `<button class="btn" data-goplans>See plans</button>`}</div>`);
+      <p class="meta" style="margin:0 0 4px">${late ? T("⚠️ This class starts within {h} hours, so this booking <b>can't be cancelled</b> or refunded.", { h: cancelHours }) : T('Free cancellation up to {h} hours before the class starts.', { h: cancelHours })}</p>
+      <div class="actions"><button class="btn ghost" data-close>${T('Not now')}</button>
+        ${enough ? `<button class="btn" data-confirm="${s.id}">${T('Confirm booking')}</button>` : `<button class="btn" data-goplans>${T('See plans')}</button>`}</div>`);
     updateBookCost(s);
     return;
   }
   if ((el = hit('[data-wait]'))) {
     if (map) map.closePopup();
-    if (!user) return openAuth('login', 'Log in or sign up to join the waitlist.');
-    if (profile && profile.role !== 'parent') return toast('Only parent accounts can join a waitlist.');
+    if (!user) return openAuth('login', T('Log in or sign up to join the waitlist.'));
+    if (profile && profile.role !== 'parent') return toast(T('Only parent accounts can join a waitlist.'));
     const s = SESSIONS.find(x => x.id === el.dataset.wait);
     openModal(`
-      <h2>Join the waitlist</h2>
-      <div class="meta">${esc(s.title)} · ${esc(s.studio)}<br>${dayName(s.date)} at ${s.time}</div>
-      <p>This class is full. If a spot opens up, <b>we'll book it for you automatically</b> and email you. It uses ⭐ ${s.credits} credits then, and you can still cancel for free up to ${cancelHours} hours before.</p>
-      <p class="meta">Make sure you have enough credits when a spot opens, or it goes to the next family in line.</p>
-      <div class="label">Who's coming?</div>
-      <select id="wlWho">${kids.map(k => `<option value="${esc(k.name)}">${esc(k.name)}</option>`).join('')}<option value="">${kids.length ? 'Someone else' : 'My little one'}</option></select>
-      <div class="actions"><button class="btn ghost" data-close>Not now</button><button class="btn" data-confirmwait="${s.id}">Join waitlist</button></div>`);
+      <h2>${T('Join the waitlist')}</h2>
+      <div class="meta">${esc(s.title)} · ${esc(s.studio)}<br>${T('{day} at {time}', { day: dayName(s.date), time: s.time })}</div>
+      <p>${T("This class is full. If a spot opens up, <b>we'll book it for you automatically</b> and email you. It uses ⭐ {n} credits then, and you can still cancel for free up to {h} hours before.", { n: s.credits, h: cancelHours })}</p>
+      <p class="meta">${T('Make sure you have enough credits when a spot opens, or it goes to the next family in line.')}</p>
+      <div class="label">${T("Who's coming?")}</div>
+      <select id="wlWho">${kids.map(k => `<option value="${esc(k.name)}">${esc(k.name)}</option>`).join('')}<option value="">${kids.length ? T('Someone else') : T('My little one')}</option></select>
+      <div class="actions"><button class="btn ghost" data-close>${T('Not now')}</button><button class="btn" data-confirmwait="${s.id}">${T('Join waitlist')}</button></div>`);
     return;
   }
   if ((el = hit('[data-confirmwait]'))) {
@@ -1784,30 +1873,30 @@ async function handleClick(e) {
     el.disabled = true;
     const { data, error } = await sb.rpc('join_waitlist', { p_slot: s.key, p_date: s.dateStr, p_attendee: ($('#wlWho') || {}).value || null });
     closeModal(); await refresh();
-    if (error) return toast(error.message);
-    toast(`⏳ You're #${data} on the waitlist. We'll email you if you get in.`); return;
+    if (error) return toast(tx(error.message));
+    toast(T("⏳ You're #{n} on the waitlist. We'll email you if you get in.", { n: data })); return;
   }
   if ((el = hit('[data-leavewait]'))) {
-    if (!confirm('Leave this waitlist? You\'ll lose your place in line.')) return;
+    if (!confirm(T("Leave this waitlist? You'll lose your place in line."))) return;
     const { error } = await sb.rpc('leave_waitlist', { p_id: el.dataset.leavewait });
-    if (error) return toast(error.message);
-    await refresh(); toast('You left the waitlist.'); return;
+    if (error) return toast(tx(error.message));
+    await refresh(); toast(T('You left the waitlist.')); return;
   }
   if ((el = hit('[data-confirm]'))) {
     const s = SESSIONS.find(x => x.id === el.dataset.confirm), who = pickedKids();
-    if (!who.length) return toast('Pick who is coming.');
+    if (!who.length) return toast(T('Pick who is coming.'));
     el.disabled = true;
     const { error } = await sb.rpc('book_class_multi', { p_slot: s.key, p_date: s.dateStr, p_attendees: who });
     closeModal();
-    if (error) { toast(error.message); await refresh(); return; }
-    await refresh(); toast(`🎉 Booked ${s.title}${who.length > 1 ? ` for ${who.length} kids` : ''}!${s.hasAddr && !s.loc ? ' The address is in My classes.' : ''}`); return;
+    if (error) { toast(tx(error.message)); await refresh(); return; }
+    await refresh(); toast((who.length > 1 ? T('🎉 Booked {title} for {n} kids!', { title: s.title, n: who.length }) : T('🎉 Booked {title}!', { title: s.title })) + (s.hasAddr && !s.loc ? ' ' + T('The address is in My classes.') : '')); return;
   }
   if ((el = hit('[data-cancel]'))) {
     const b = myBookings.find(x => x.id === el.dataset.cancel), s = sessionFromBooking(b);
     if (!b) return;
     const { error } = await sb.rpc('cancel_booking', { p_booking: b.id });
-    if (error) return toast(error.message);
-    await refresh(); toast(`Cancelled. ⭐ ${s.credits} credits refunded`); return;
+    if (error) return toast(tx(error.message));
+    await refresh(); toast(T('Cancelled. ⭐ {n} credits refunded', { n: s.credits })); return;
   }
   if (hit('[data-goplans]')) { closeModal(); showTab('plans'); return; }
   if ((el = hit('[data-plan]'))) { startCheckout(el.dataset.plan); return; }
@@ -1823,18 +1912,18 @@ function whoPicker(s) {
   if (!kids.length) return '<input type="hidden" id="bkOnly" value="">';
   const fits = k => { const m = monthsOld(k.birthday); return m >= s.ageMin && m <= s.ageMax; };
   const first = free.find(fits) || free[0];
-  return `<div class="label">Who's coming?</div><div id="bkWho" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px">
-    ${taken.length ? `<div class="meta">Already booked: ${esc(taken.join(', '))}</div>` : ''}
-    ${free.map(k => `<label class="chk"><input type="checkbox" value="${esc(k.name)}" ${k === first ? 'checked' : ''}> ${esc(k.name)}${fits(k) ? '' : ' <span class="meta">(outside the age range)</span>'}</label>`).join('')}
+  return `<div class="label">${T("Who's coming?")}</div><div id="bkWho" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px">
+    ${taken.length ? `<div class="meta">${T('Already booked:')} ${esc(taken.join(', '))}</div>` : ''}
+    ${free.map(k => `<label class="chk"><input type="checkbox" value="${esc(k.name)}" ${k === first ? 'checked' : ''}> ${esc(k.name)}${fits(k) ? '' : ` <span class="meta">${T('(outside the age range)')}</span>`}</label>`).join('')}
   </div>`;
 }
 const pickedKids = () => $('#bkOnly') ? [null] : [...document.querySelectorAll('#bkWho input:checked')].map(i => i.value);
 function updateBookCost(s) {
   const n = pickedKids().length, total = n * s.credits, have = profile ? profile.credits : 0, btn = $('[data-confirm]');
   const tooMany = n > s.spots;
-  $('#bkCost').innerHTML = `<b>Cost: ⭐ ${total} credits</b>${n > 1 ? ` (${n} × ${s.credits})` : ''} · You have ${have}`
-    + (tooMany ? `<br><span class="low">Only ${s.spots} spot${s.spots === 1 ? '' : 's'} left.</span>` : '')
-    + (total > have ? `<br><span class="low">You need ${total - have} more credits. Pick a plan to top up.</span>` : '');
+  $('#bkCost').innerHTML = `<b>${T('Cost: ⭐ {n} credits', { n: total })}</b>${n > 1 ? ` (${n} × ${s.credits})` : ''} · ${T('You have {n}', { n: have })}`
+    + (tooMany ? `<br><span class="low">${T(s.spots === 1 ? 'Only {n} spot left.' : 'Only {n} spots left.', { n: s.spots })}</span>` : '')
+    + (total > have ? `<br><span class="low">${T('You need {n} more credits. Pick a plan to top up.', { n: total - have })}</span>` : '');
   if (btn) btn.disabled = !n || tooMany || total > have;
 }
 document.body.addEventListener('change', e => {
@@ -1853,7 +1942,7 @@ function showTab(name) {
   currentView = view;
   VIEWS.forEach(t => $('#view-' + t).classList.toggle('hidden', t !== view));
   markNav();
-  if (view !== 'studio') document.title = 'LittlePass San Diego | Baby & toddler classes';
+  if (view !== 'studio') document.title = T('LittlePass San Diego | Baby & toddler classes');
   if (!['studio', 'owner', 'admin'].includes(view)) lastTab = view;
   else if (view === 'admin') lastTab = name;
   else if (view === 'owner') lastTab = name.startsWith('o-') ? name : 'owner';
@@ -1886,13 +1975,15 @@ $('#installClose').onclick = () => { $('#installTip').classList.remove('show'); 
 maybeShowInstallTip();
 
 // ---------- Start ----------
+applyStatic();
 renderAll();
 (async () => {
   try { await loadPublic(); }
-  catch (err) { $('#results').innerHTML = `<div class="empty">Couldn't load classes. Please refresh.<br><small>${esc(err.message || err)}</small></div>`; return; }
+  catch (err) { $('#results').innerHTML = `<div class="empty">${T("Couldn't load classes. Please refresh.")}<br><small>${esc(err.message || err)}</small></div>`; return; }
   loaded = true; buildSessions(); renderAll();
   track('visit');
   { const m = location.hash.match(/^#studio\/(.+)$/); if (m && studioByName(decodeURIComponent(m[1]))) showStudio(decodeURIComponent(m[1]), true); }
+  pendingRoute = routeFromHash();
   const co = new URLSearchParams(location.search).get('checkout');
   if (co) { history.replaceState(null, '', location.pathname); afterCheckout(co); }
   // Fires once right away with the saved session, then on every login/logout
@@ -1903,7 +1994,15 @@ renderAll();
     if (uid === lastUid && event !== 'INITIAL_SESSION') return; // ignore token refreshes
     lastUid = uid;
     setTimeout(async () => {
-      await loadPrivate(); buildSessions(); renderAll();
+      await loadPrivate(); buildSessions();
+      // A parent's saved language follows them to new devices, unless they picked one on this device
+      if (profile && profile.role === 'parent') {
+        let picked = null; try { picked = localStorage.getItem('lp-lang'); } catch (e) {}
+        if (!picked && profile.lang && profile.lang !== LANG) { LANG = profile.lang; applyStatic(); }
+        else if (profile.lang !== LANG) sb.from('profiles').update({ lang: LANG }).eq('id', user.id).then(() => {}, () => {});
+      }
+      renderAll();
+      if (applyRoute()) return;
       if (isAdmin() && !['admin', 'studio'].includes(currentView)) showTab('a-studios');
       if (isStudioUser() && !['owner', 'studio'].includes(currentView)) showTab('o-overview');
       if (!user && ['owner', 'admin'].includes(currentView)) showTab('explore');

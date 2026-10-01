@@ -60,6 +60,10 @@
   .bar { max-width: 960px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; gap: 12px; }
   .logo { font-weight: 800; font-size: 22px; display: flex; align-items: center; gap: 8px; }
   .logo span { color: var(--brand); }
+  .logo { margin-right: auto; }
+  .ownertxt { margin-left: 4px; }
+  @media (max-width: 420px) { .ownertxt { display: none; } .bar { gap: 8px; } }
+  .langbtn { background: none; border: 1.5px solid var(--line); border-radius: 999px; padding: 6px 9px; font-weight: 800; font-size: 12px; color: var(--muted); }
   .credits {
     background: var(--ink); color: #fff; border: 0;
     border-radius: 999px; padding: 8px 14px; font-weight: 700; white-space: nowrap;
@@ -318,7 +322,8 @@
 <header>
   <div class="bar">
     <div class="logo">🐣 Little<span>Pass</span></div>
-    <button class="ownerbtn" id="ownerBtn">🏢 For studios</button>
+    <button class="langbtn" id="langBtn" aria-label="Cambiar a español">ES</button>
+    <button class="ownerbtn" id="ownerBtn" aria-label="For studios" data-taria>🏢<span class="ownertxt" data-t>For studios</span></button>
     <button class="credits" id="creditBtn">Log in</button>
   </div>
 </header>
@@ -328,48 +333,48 @@
   <!-- EXPLORE -->
   <section id="view-explore">
     <div class="hero">
-      <h1>Baby & toddler classes all over San Diego</h1>
-      <p>One membership. Swim, music, gym, art and more, from newborn to age 5.</p>
+      <h1 data-t>Baby & toddler classes all over San Diego</h1>
+      <p data-t>One membership. Swim, music, gym, art and more, from newborn to age 5.</p>
     </div>
 
     <div class="searchrow">
-      <input id="searchBox" type="search" placeholder="Search studios, classes, places…" aria-label="Search studios, classes or neighborhoods" autocomplete="off">
+      <input id="searchBox" type="search" placeholder="Search studios, classes, places…" aria-label="Search studios, classes or neighborhoods" data-tph data-taria autocomplete="off">
     </div>
     <div class="chiprows">
-      <div class="chips" id="ageChips" aria-label="Child's age"></div>
-      <div class="chips" id="catChips" aria-label="Activity"></div>
+      <div class="chips" id="ageChips" aria-label="Child's age" data-taria></div>
+      <div class="chips" id="catChips" aria-label="Activity" data-taria></div>
     </div>
     <div class="toolbar">
-      <div class="seg" id="seg"><button data-mode="list" class="on">☰ List</button><button data-mode="map">🗺️ Map</button></div>
-      <button class="chip fbtn" id="filtersBtn" aria-expanded="false" aria-controls="filterPanel">⚙️ Filters<span id="filtCount"></span></button>
+      <div class="seg" id="seg"><button data-mode="list" class="on" data-t>☰ List</button><button data-mode="map" data-t>🗺️ Map</button></div>
+      <button class="chip fbtn" id="filtersBtn" aria-expanded="false" aria-controls="filterPanel"><span data-t>⚙️ Filters</span><span id="filtCount"></span></button>
     </div>
 
     <div class="filters hidden" id="filterPanel">
       <div class="row2">
         <div>
-          <div class="label">Studio</div>
+          <div class="label" data-t>Studio</div>
           <select id="studioSel"></select>
         </div>
         <div>
-          <div class="label">Class</div>
+          <div class="label" data-t>Class</div>
           <select id="classSel"></select>
         </div>
       </div>
       <div>
-        <div class="label">Neighborhood</div>
+        <div class="label" data-t>Neighborhood</div>
         <select id="hoodSel"></select>
       </div>
       <div>
-        <div class="label">Date</div>
+        <div class="label" data-t>Date</div>
         <div id="dayCal"></div>
       </div>
-      <div class="panelfoot"><button class="btn ghost" data-clearfilters>Clear all</button><button class="btn" id="showResults">Show results</button></div>
+      <div class="panelfoot"><button class="btn ghost" data-clearfilters data-t>Clear all</button><button class="btn" id="showResults" data-t>Show results</button></div>
     </div>
 
     <div id="studioHits"></div>
     <div id="results"></div>
     <div id="mapWrap" class="hidden">
-      <div class="mapbar"><span class="meta" id="mapCount"></span><button class="btn ghost" id="nearBtn">📍 Near me</button></div>
+      <div class="mapbar"><span class="meta" id="mapCount"></span><button class="btn ghost" id="nearBtn" data-t>📍 Near me</button></div>
       <div id="map"></div>
       <div class="maplist" id="nearList"></div>
     </div>
@@ -384,20 +389,20 @@
 
   <!-- BOOKINGS -->
   <section id="view-bookings" class="hidden">
-    <h2 style="margin-top:24px">My classes</h2>
+    <h2 style="margin-top:24px" data-t>My classes</h2>
     <div id="bookingList"></div>
   </section>
 
   <!-- PLANS -->
   <section id="view-plans" class="hidden">
-    <h2 style="margin:24px 0 4px">Choose a plan</h2>
-    <p class="meta" style="margin:0">Credits arrive every month and roll over while you're subscribed. Most classes cost 3–6 credits. Cancel anytime.</p>
+    <h2 style="margin:24px 0 4px" data-t>Choose a plan</h2>
+    <p class="meta" style="margin:0" data-t>Credits arrive every month and roll over while you're subscribed. Most classes cost 3–6 credits. Cancel anytime.</p>
     <div class="plans" id="planList"></div>
   </section>
 
   <!-- PROFILE -->
   <section id="view-profile" class="hidden"></section>
-  <footer class="legalfoot"><a href="legal/terms.html">Terms</a> · <a href="legal/privacy.html">Privacy</a> · <a href="legal/studio-agreement.html">Studio agreement</a></footer>
+  <footer class="legalfoot"><a href="legal/terms.html" data-t>Terms</a> · <a href="legal/privacy.html" data-t>Privacy</a> · <a href="legal/studio-agreement.html" data-t>Studio agreement</a></footer>
 </main>
 
 <nav class="tabs">
@@ -409,8 +414,9 @@
 
 <div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
-<div id="installTip" role="note"><img src="icon-180.png" alt=""><span><b>Add LittlePass to your home screen.</b> Tap the Share button, then <b>Add to Home Screen</b>.</span><button id="installClose" aria-label="Dismiss">×</button></div>
+<div id="installTip" role="note"><img src="icon-180.png" alt=""><span data-th><b>Add LittlePass to your home screen.</b> Tap the Share button, then <b>Add to Home Screen</b>.</span><button id="installClose" aria-label="Dismiss" data-taria>×</button></div>
 
+<script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
