@@ -595,7 +595,7 @@ function renderPlans() {
     const end = profile.plan_period_end ? fmtDate(profile.plan_period_end) : '';
     banner = `<div class="notice ${profile.plan_status === 'past_due' ? 'rej' : 'pend'}" style="grid-column:1/-1;margin:0;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap">
       <div>${profile.plan_status === 'past_due' ? '⚠️ <b>Your last payment failed.</b> Please update your card to keep your credits coming.'
-        : profile.cancel_at_period_end ? `Your plan <b>cancels on ${end}</b>. Unused credits expire then.` : `✅ Your plan renews on <b>${end}</b>. Unused credits roll over, up to double your monthly credits.`}</div>
+        : profile.cancel_at_period_end ? `Your plan <b>cancels on ${end}</b>. Unused credits expire then.` : `✅ Your plan renews on <b>${end}</b>. Unused credits roll over, up to double your monthly credits. Upgrade anytime and get the extra credits right away. Downgrades start at your next renewal.`}</div>
       <button class="btn" data-manage>Manage subscription</button></div>`;
   }
   const isParent = !user || (profile && profile.role === 'parent');
@@ -604,7 +604,7 @@ function renderPlans() {
     let btn = '';
     if (!isParent) btn = '';
     else if (cur) btn = `<button class="btn ghost" disabled>✓ Current plan</button>`;
-    else if (subActive()) btn = `<button class="btn ghost" data-manage>Change plan</button>`;
+    else if (subActive()) { const curP = planList().find(x => x.id === profile.plan); btn = `<button class="btn ghost" data-manage>${curP && p.price > curP.price ? 'Upgrade' : 'Switch plan'}</button>`; }
     else if (!p.ready) btn = `<button class="btn ghost" disabled>Coming soon</button>`;
     else btn = `<button class="btn" data-plan="${p.id}">${user ? 'Subscribe' : 'Log in to subscribe'}</button>`;
     return `<div class="plan ${p.pop ? 'pop' : ''}">
