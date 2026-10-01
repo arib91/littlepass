@@ -56,7 +56,7 @@ let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
 let adminPay = [], adminPayouts = [], adminPricing = null, adminReports = [];
-let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [];
+let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [], locations = [];
 
 // ---------- Helpers ----------
 const $ = s => document.querySelector(s);
@@ -96,7 +96,7 @@ $('#modalBg').onclick = e => { if (e.target.id === 'modalBg' || e.target.dataset
 
 // ---------- Data ----------
 async function loadPublic() {
-  const [st, cl, sl, rv, ct, ch, ph, pl] = await Promise.all([
+  const [st, cl, sl, rv, ct, ch, ph, pl, lc] = await Promise.all([
     sb.from('studios').select('*'),
     sb.from('classes').select('*'),
     sb.from('class_slots').select('*'),
@@ -105,7 +105,9 @@ async function loadPublic() {
     sb.rpc('get_cancel_hours'),
     sb.from('studio_photos').select('*').order('created_at'),
     sb.from('plans').select('*').order('sort'),
+    sb.from('class_locations').select('*'),
   ]);
+  locations = lc.data || [];
   studioPhotos = ph.data || [];
   plansDb = pl.data || [];
   if (typeof ch.data === 'number') cancelHours = ch.data;
@@ -166,18 +168,42 @@ function buildSessions() {
       if (d.getDay() !== sl.dow) return;
       if (d.getTime() === today.getTime() && h * 60 + m <= nowMin) return; // already started
       const dateStr = fmt(d), id = `${sl.id}_${dateStr}`, taken = counts[id] || 0;
-      SESSIONS.push({ id, key: sl.id, classId: c.id, studioId: st.id, dateStr, title: c.title, studio: st.name, cat: c.cat, hood: c.hood,
+      SESSIONS.push({ loc: locByClass(c.id), hasAddr: c.has_address, id, key: sl.id, classId: c.id, studioId: st.id, dateStr, title: c.title, studio: st.name, cat: c.cat, hood: c.hood,
         ageMin: c.age_min, ageMax: c.age_max, credits: sl.credits, priceCents: sl.price_cents, date: d,
         time: t12(sl.start_time), time24: String(sl.start_time).slice(0, 8), mins: sl.mins, capacity: sl.capacity, taken, spots: sl.capacity - taken });
       any = true;
     });
-    if (any && COORDS[c.hood] && !PARTNERS.find(x => x.studio === st.name && x.hood === c.hood)) {
-      const n = PARTNERS.filter(x => x.hood === c.hood).length, base = COORDS[c.hood];
-      PARTNERS.push({ studio: st.name, hood: c.hood, pos: [base[0] + n * 0.006, base[1] + n * 0.008] });
+    if (any) {
+      const loc = locByClass(c.id), exact = !!(loc && loc.lat != null);
+      const key = exact ? `${loc.lat.toFixed(4)},${loc.lng.toFixed(4)}` : 'approx';
+      if (!PARTNERS.find(x => x.studio === st.name && x.hood === c.hood && x.key === key) && (exact || COORDS[c.hood])) {
+        let pos;
+        if (exact) pos = [loc.lat, loc.lng];
+        else { const n = PARTNERS.filter(x => x.hood === c.hood).length, base = COORDS[c.hood]; pos = [base[0] + n * 0.006, base[1] + n * 0.008]; }
+        PARTNERS.push({ studio: st.name, hood: c.hood, key, pos, loc: loc || null, exact });
+      }
     }
   });
 }
 const cancellable = b => new Date(`${b.session_date}T${b.session_time}`) - Date.now() >= cancelHours * 36e5;
+const locByClass = id => locations.find(l => l.class_id === id) || null;
+const gmaps = l => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(l.address)}`;
+const amaps = l => `https://maps.apple.com/?daddr=${encodeURIComponent(l.address)}`;
+const dirLinks = l => `<a class="lnk" href="${gmaps(l)}" target="_blank" rel="noopener">Google Maps</a> · <a class="lnk" href="${amaps(l)}" target="_blank" rel="noopener">Apple Maps</a>`;
+const sessKey = s => s.loc && s.loc.lat != null ? `${s.loc.lat.toFixed(4)},${s.loc.lng.toFixed(4)}` : 'approx';
+// Free OpenStreetMap lookup, used once when a studio saves an address. Results outside San Diego County are ignored.
+async function geocode(addr) {
+  try {
+    const q = /san diego|, ca\b/i.test(addr) ? addr : addr + ', San Diego County, CA';
+    const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=' + encodeURIComponent(q));
+    const j = await r.json();
+    if (j[0]) {
+      const lat = +j[0].lat, lng = +j[0].lon;
+      if (lat > 32.4 && lat < 33.5 && lng > -117.7 && lng < -116.8) return { lat, lng };
+    }
+  } catch (e) {}
+  return null;
+}
 const bookingFor = id => myBookings.find(b => `${b.slot_id}_${b.session_date}` === id);
 const isBooked = id => !!bookingFor(id);
 // A booked class, even if the studio has since changed or paused the slot
@@ -185,7 +211,7 @@ function sessionFromBooking(b) {
   const live = SESSIONS.find(s => s.id === `${b.slot_id}_${b.session_date}`);
   if (live) return live;
   const c = classes.find(x => x.id === b.class_id), st = studioById(b.studio_id);
-  return { id: `${b.slot_id}_${b.session_date}`, key: b.slot_id, title: b.class_title, studio: st ? st.name : 'Studio',
+  return { loc: locByClass(b.class_id), id: `${b.slot_id}_${b.session_date}`, key: b.slot_id, title: b.class_title, studio: st ? st.name : 'Studio',
     cat: c ? c.cat : 'all', hood: c ? c.hood : 'San Diego', ageMin: 0, ageMax: 0, credits: b.credits,
     date: new Date(b.session_date + 'T00:00:00'), time: t12(b.session_time), mins: 0, spots: 1 };
 }
@@ -365,7 +391,7 @@ function card(s, mode) {
     <div class="emoji" style="background:${c.color}">${c.emoji}</div>
     <div>
       <h3>${esc(s.title)}</h3>
-      <div class="meta"><a class="lnk" data-studio="${esc(s.studio)}">${esc(s.studio)}</a><br>📍 ${s.hood} · 🕘 ${mode === 'booking' ? dayName(s.date) + ', ' : ''}${s.time} (${s.mins} min)</div>
+      <div class="meta"><a class="lnk" data-studio="${esc(s.studio)}">${esc(s.studio)}</a><br>📍 ${s.hood} · 🕘 ${mode === 'booking' ? dayName(s.date) + ', ' : ''}${s.time}${s.mins ? ` (${s.mins} min)` : ''}${s.loc ? (mode === 'booking' ? `<br>🧭 ${esc(s.loc.address)}<br>${dirLinks(s.loc)}` : ` · <a class="lnk" href="${gmaps(s.loc)}" target="_blank" rel="noopener">Directions</a>`) : ''}</div>
       <div class="tags">
         ${s.ageMax ? `<span class="tag">👶 ${ageText(s.ageMin, s.ageMax)}</span>` : ''}
         ${(() => { const rt = s.classId && classRating(s.classId); return rt ? `<span class="tag">★ ${rt.avg.toFixed(1)} (${rt.n})</span>` : ''; })()}
@@ -407,16 +433,16 @@ function showMap(list, fly) {
     map.on('popupopen', ev => ev.popup.getElement().addEventListener('click', handleClick));
   }
   markers.forEach(m => m.remove()); markers = [];
-  const shown = PARTNERS.filter(p => list.some(s => s.studio === p.studio && s.hood === p.hood));
+  const shown = PARTNERS.filter(p => list.some(s => s.studio === p.studio && s.hood === p.hood && sessKey(s) === p.key));
   $('#mapCount').textContent = `${shown.length} partner${shown.length === 1 ? '' : 's'} match your filters`;
   shown.forEach(p => {
-    const mine = list.filter(s => s.studio === p.studio && s.hood === p.hood).sort((a, b) => a.date - b.date);
+    const mine = list.filter(s => s.studio === p.studio && s.hood === p.hood && sessKey(s) === p.key).sort((a, b) => a.date - b.date);
     const c = CATS[filters.cat !== 'all' ? filters.cat : mine[0].cat];
     const icon = L.divIcon({ className: '', iconSize: [38, 38], iconAnchor: [19, 38], popupAnchor: [0, -36],
       html: `<div class="pin" style="background:${c.color}"><span>${c.emoji}</span></div>` });
     const away = userPos ? ` · ${miles(userPos, p.pos).toFixed(1)} mi away` : '';
     const html = `<div class="pop"><h3><a class="lnk" data-studio="${esc(p.studio)}">${esc(p.studio)}</a></h3>
-      <div class="meta">📍 ${p.hood}${away}</div><div style="margin-top:8px">${mine.slice(0, 3).map(s => `<div class="cls"><div><b>${esc(s.title)}</b><br>${dayName(s.date)} · ${s.time}</div>
+      <div class="meta">📍 ${p.loc ? esc(p.loc.address) : p.hood}${away}</div>${p.loc ? `<div class="meta">🧭 ${dirLinks(p.loc)}</div>` : ''}<div style="margin-top:8px">${mine.slice(0, 3).map(s => `<div class="cls"><div><b>${esc(s.title)}</b><br>${dayName(s.date)} · ${s.time}</div>
       ${isBooked(s.id) ? '<span class="tag">✓ Booked</span>' : s.spots <= 0 ? '<span class="tag">Full</span>' : `<button class="btn" data-book="${s.id}">⭐ ${s.credits} · Book</button>`}</div>`).join('')}</div>
       ${mine.length > 3 ? `<div class="meta" style="margin-top:6px">+ ${mine.length - 3} more · <a class="lnk" data-studio="${esc(p.studio)}">see all</a></div>` : ''}</div>`;
     const m = L.marker(p.pos, { icon }).addTo(map).bindPopup(html, { minWidth: 240 });
@@ -520,6 +546,9 @@ function renderStudio() {
     </div>
     <div class="panel"><div class="label">About</div><p style="margin:0">${esc(st.blurb || 'A LittlePass partner studio.')}</p>
       <div class="tags">${cats.map(c => `<span class="tag">${CATS[c].emoji} ${CATS[c].label}</span>`).join('')}</div></div>
+    ${cs.length ? `<div class="panel"><div class="label">Where</div>${[...new Map(cs.map(c => { const l = locByClass(c.id); return [l ? 'a:' + l.address : 'h:' + c.hood + (c.has_address ? '!' : ''), { c, l }]; })).values()].map(({ c, l }) =>
+      l ? `<div style="margin:4px 0">📍 ${esc(l.address)}<div class="meta">🧭 ${dirLinks(l)}</div></div>`
+        : `<div style="margin:4px 0">📍 ${c.hood}${c.has_address ? '<div class="meta">🔒 Exact address shared after you book</div>' : ''}</div>`).join('')}</div>` : ''}
     ${photos.length ? `<div class="label" style="margin-top:20px">Photos</div><div class="photos real">${photos.map(p => `<img class="photo" loading="lazy" alt="${esc(p.caption || st.name)}" src="${photoUrl(p)}" data-photo="${p.id}">`).join('')}</div>`
       : sample && cats.length ? `<div class="label" style="margin-top:20px">Photos</div><div class="photos">${cats.concat(cats, cats).slice(0, 3).map(c => `<div class="photo" style="background:${CATS[c].color}">${CATS[c].emoji}</div>`).join('')}</div><div class="meta" style="margin-top:4px">Placeholder images for this demo partner.</div>` : ''}
     <h2 style="margin:24px 0 0">Schedule this week</h2>${sched || '<div class="empty">No classes this week</div>'}
@@ -773,6 +802,10 @@ function ownerClasses(el, st) {
         <div class="two three"><div><div class="label">Neighborhood</div><select data-cf="hood">${HOODS.slice(1).map(h => `<option ${h === c.hood ? 'selected' : ''}>${h}</option>`).join('')}</select></div>
         <div><div class="label">From age</div><select data-cf="age_min">${ages.map(m => ageOpt(m, c.age_min)).join('')}</select></div>
         <div><div class="label">To age</div><select data-cf="age_max">${ages.map(m => ageOpt(m, c.age_max)).join('')}</select></div></div>
+        ${(() => { const l = locByClass(c.id);
+          return `<div class="two"><div><div class="label">Address</div><input data-lf="address" value="${esc(l ? l.address : '')}" placeholder="123 Main St, San Diego, CA" maxlength="200"></div>
+          <div><div class="label">Who can see it</div><select data-lf="visibility"><option value="booked" ${!l || l.visibility === 'booked' ? 'selected' : ''}>Only parents who booked</option><option value="public" ${l && l.visibility === 'public' ? 'selected' : ''}>Everyone</option></select></div></div>
+          <div class="meta" style="margin:-4px 0 10px">${!l ? 'No address yet. Add one so parents can get directions.' : l.lat != null ? '📍 Found on the map. ' + (l.visibility === 'public' ? 'Everyone sees the exact pin and directions.' : 'Others see only the neighborhood until they book.') : '⚠️ We couldn\'t place this address on the map. Check the spelling. Parents still get directions.'}</div>`; })()}
         <div class="label" style="margin-top:4px">Time slots</div>
         ${cslots.length ? cslots.map(slotRow).join('') : '<p class="meta">No time slots yet. Add one below.</p>'}
         <details class="addsched"><summary>＋ Add time slots</summary>${scheduleForm()}<button class="btn" data-addsched="${c.id}">Add slots</button></details>
@@ -784,6 +817,8 @@ function ownerClasses(el, st) {
       <div><div class="label">Neighborhood</div><select id="ncHood">${HOODS.slice(1).map(h => `<option>${h}</option>`).join('')}</select></div></div>
       <div class="two"><div><div class="label">From age</div><select id="ncMin">${ages.map(m => ageOpt(m, 6)).join('')}</select></div>
       <div><div class="label">To age</div><select id="ncMax">${ages.map(m => ageOpt(m, 24)).join('')}</select></div></div>
+      <div class="two"><div><div class="label">Address (optional)</div><input id="ncAddr" placeholder="123 Main St, San Diego, CA" maxlength="200"></div>
+      <div><div class="label">Who can see it</div><select id="ncVis"><option value="booked">Only parents who booked</option><option value="public">Everyone</option></select></div></div>
       <div class="newsched">${scheduleForm()}</div>
       <button class="btn" data-createclass style="padding:12px 20px">Create class</button></div></details>`;
 }
@@ -808,6 +843,8 @@ async function createClass() {
   if (error) return toast(error.message);
   const r = await sb.from('class_slots').insert(slotRows(c.id, sch));
   if (r.error) toast(r.error.message);
+  const addr = $('#ncAddr').value.trim();
+  if (addr) await saveLocation(c.id, { address: addr, visibility: $('#ncVis').value }, true);
   await refresh(); toast(`✅ ${title} is live!`);
 }
 async function addSlots(classId, box) {
@@ -838,6 +875,26 @@ async function saveSlot(el) {
   row.classList.toggle('off', !data.active);
   row.querySelector('.cr').textContent = '⭐ ' + data.credits;
   toast('Saved ✓');
+}
+async function saveLocation(classId, fields, quiet) {
+  const cur = locByClass(classId);
+  const address = (fields.address !== undefined ? fields.address : cur && cur.address || '').trim();
+  const visibility = fields.visibility || (cur && cur.visibility) || 'booked';
+  if (!address) {
+    if (cur) { const { error } = await sb.from('class_locations').delete().eq('class_id', classId); if (error) return toast(error.message); }
+  } else {
+    if (address.length < 5) return toast('Please enter the full street address');
+    let lat = cur ? cur.lat : null, lng = cur ? cur.lng : null;
+    if (!cur || address !== cur.address) {
+      if (!quiet) toast('Looking up that address…');
+      const g = await geocode(address);
+      lat = g ? g.lat : null; lng = g ? g.lng : null;
+    }
+    const { error } = await sb.from('class_locations').upsert({ class_id: classId, address, lat, lng, visibility, updated_at: new Date().toISOString() }, { onConflict: 'class_id' });
+    if (error) return toast(error.message);
+  }
+  if (quiet) return;
+  await loadPublic(); buildSessions(); renderOwner(); toast('Address saved ✓');
 }
 async function saveClassField(el) {
   const id = el.closest('[data-classbox]').dataset.classbox, c = classes.find(x => x.id === id), f = el.dataset.cf;
@@ -1004,6 +1061,10 @@ const ov = $('#view-owner');
 ov.addEventListener('change', e => {
   const s = e.target.closest('[data-sf]'); if (s) return saveSlot(s);
   const c = e.target.closest('[data-cf]'); if (c) return saveClassField(c);
+  const lf = e.target.closest('[data-lf]'); if (lf) {
+    const id = lf.closest('[data-classbox]').dataset.classbox;
+    return saveLocation(id, lf.dataset.lf === 'address' ? { address: lf.value } : { visibility: lf.value });
+  }
 });
 ov.addEventListener('input', e => { if (e.target.matches('[data-ns="price"]')) previewCredits(e.target); });
 
@@ -1022,7 +1083,7 @@ const adminCard = s => {
     ${s.blurb ? `<p style="margin:10px 0 0">${esc(s.blurb)}</p>` : ''}
     <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:800;color:var(--brand-dark)">${cs.length} class${cs.length === 1 ? '' : 'es'}</summary>
       ${cs.map(c => { const ss = slots.filter(x => x.class_id === c.id).sort((a, b) => a.dow - b.dow);
-        return `<div style="margin-top:10px"><b>${CATS[c.cat].emoji} ${esc(c.title)}</b> <span class="meta">· ${c.hood} · ${ageText(c.age_min, c.age_max)}</span>
+        return `<div style="margin-top:10px"><b>${CATS[c.cat].emoji} ${esc(c.title)}</b> <span class="meta">· ${c.hood} · ${ageText(c.age_min, c.age_max)}${locByClass(c.id) ? ' · 📍 ' + esc(locByClass(c.id).address) : ''}</span>
           ${ss.map(x => `<div class="meta">${DOW[x.dow]} ${t12(x.start_time)} · ${x.capacity} spots · ${money(x.price_cents)} → ⭐ ${x.credits}${x.active ? '' : ' (closed)'}</div>`).join('') || '<div class="meta">No time slots</div>'}</div>`; }).join('') || '<div class="meta" style="margin-top:8px">No classes yet.</div>'}</details></div>`;
 };
 function renderAdmin() {
@@ -1231,7 +1292,8 @@ async function handleClick(e) {
     openModal(`
       <div class="emoji" style="background:${CATS[s.cat].color};margin-bottom:12px">${CATS[s.cat].emoji}</div>
       <h2>${esc(s.title)}</h2>
-      <div class="meta">${esc(s.studio)} · ${s.hood}<br>${dayName(s.date)} at ${s.time} · ${s.mins} min<br>Ages ${ageText(s.ageMin, s.ageMax)}</div>
+      <div class="meta">${esc(s.studio)} · ${s.hood}<br>${dayName(s.date)} at ${s.time} · ${s.mins} min<br>Ages ${ageText(s.ageMin, s.ageMax)}${s.loc ? `<br>🧭 ${esc(s.loc.address)}` : ''}</div>
+      ${!s.loc && s.hasAddr ? '<p class="meta" style="margin:8px 0 0">🔒 The exact address is shared with you once you book.</p>' : ''}
       <p><b>Cost: ⭐ ${s.credits} credits</b> · You have ${credits}</p>
       <div class="label">Who's coming?</div>
       <select id="bkWho">${kids.map(k => `<option value="${esc(k.name)}">${esc(k.name)}</option>`).join('')}<option value="">${kids.length ? 'Someone else' : 'My little one'}</option></select>
@@ -1248,7 +1310,7 @@ async function handleClick(e) {
     const { error } = await sb.rpc('book_class', { p_slot: s.key, p_date: s.dateStr, p_attendee: ($('#bkWho') || {}).value || null });
     closeModal();
     if (error) { toast(error.message); await refresh(); return; }
-    await refresh(); toast(`🎉 Booked ${s.title}!`); return;
+    await refresh(); toast(`🎉 Booked ${s.title}!${s.hasAddr && !s.loc ? ' The address is in My classes.' : ''}`); return;
   }
   if ((el = hit('[data-cancel]'))) {
     const b = bookingFor(el.dataset.cancel), s = sessionFromBooking(b);
