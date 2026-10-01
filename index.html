@@ -253,6 +253,16 @@
   .filters > *, .row2 > *, .two > * { min-width: 0; }
   .chips { max-width: 100%; }
   html, body { overflow-x: hidden; }
+  /* Explore: search first, results right under it, filters tucked in a panel */
+  .searchrow { margin: 14px 0 0; }
+  .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0 6px; }
+  .toolbar .seg { margin: 0; }
+  .fbtn.on { border-color: var(--brand); color: var(--brand-dark); }
+  #filterPanel { background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 14px; margin: 8px 0 14px; }
+  .panelfoot { display: flex; gap: 8px; justify-content: flex-end; }
+  @media (max-width: 430px) { .hero { padding: 18px 16px; margin: 12px 0 0; } .hero h1 { font-size: 22px; } }
+  .chiprows { display: grid; gap: 8px; margin-top: 10px; min-width: 0; }
+  .chiprows .chip { padding: 6px 12px; font-size: 14px; }
   .legalfoot { text-align: center; font-size: 13px; color: var(--muted); margin-top: 36px; }
   .legalfoot a { color: var(--muted); }
   .hidden { display: none !important; }
@@ -277,11 +287,19 @@
       <p>One membership. Swim, music, gym, art and more, from newborn to age 5.</p>
     </div>
 
-    <div class="filters">
-      <div>
-        <div class="label">Search</div>
-        <input id="searchBox" type="search" placeholder="Search studios, classes or neighborhoods…" autocomplete="off">
-      </div>
+    <div class="searchrow">
+      <input id="searchBox" type="search" placeholder="Search studios, classes, places…" aria-label="Search studios, classes or neighborhoods" autocomplete="off">
+    </div>
+    <div class="chiprows">
+      <div class="chips" id="ageChips" aria-label="Child's age"></div>
+      <div class="chips" id="catChips" aria-label="Activity"></div>
+    </div>
+    <div class="toolbar">
+      <div class="seg" id="seg"><button data-mode="list" class="on">☰ List</button><button data-mode="map">🗺️ Map</button></div>
+      <button class="chip fbtn" id="filtersBtn" aria-expanded="false" aria-controls="filterPanel">⚙️ Filters<span id="filtCount"></span></button>
+    </div>
+
+    <div class="filters hidden" id="filterPanel">
       <div class="row2">
         <div>
           <div class="label">Studio</div>
@@ -291,14 +309,6 @@
           <div class="label">Class</div>
           <select id="classSel"></select>
         </div>
-      </div>
-      <div>
-        <div class="label">Child's age</div>
-        <div class="chips" id="ageChips"></div>
-      </div>
-      <div>
-        <div class="label">Activity</div>
-        <div class="chips" id="catChips"></div>
       </div>
       <div class="row2">
         <div>
@@ -310,10 +320,10 @@
           <select id="daySel"></select>
         </div>
       </div>
+      <div class="panelfoot"><button class="btn ghost" data-clearfilters>Clear all</button><button class="btn" id="showResults">Show results</button></div>
     </div>
 
     <div id="studioHits"></div>
-    <div class="seg" id="seg"><button data-mode="list" class="on">☰ List</button><button data-mode="map">🗺️ Map</button></div>
     <div id="results"></div>
     <div id="mapWrap" class="hidden">
       <div class="mapbar"><span class="meta" id="mapCount"></span><button class="btn ghost" id="nearBtn">📍 Near me</button></div>

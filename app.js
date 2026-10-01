@@ -335,15 +335,16 @@ function renderFilters() {
   $('#hoodSel').innerHTML = HOODS.map(h => `<option ${filters.hood === h ? 'selected' : ''}>${h}</option>`).join('');
   $('#daySel').innerHTML = `<option value="all">Next 7 days</option>` +
     DAYS.map((d, i) => `<option value="${i}" ${filters.day == i ? 'selected' : ''}>${dayName(d)}</option>`).join('');
+  updateFilterBadge();
 }
 $('#ageChips').onclick = e => { const b = e.target.closest('[data-age]'); if (!b) return; filters.age = b.dataset.age; renderFilters(); renderResults(); };
 $('#catChips').onclick = e => { const b = e.target.closest('[data-cat]'); if (!b) return; filters.cat = b.dataset.cat; renderFilters(); renderResults(); };
 $('#studioSel').onchange = e => { filters.studio = e.target.value; renderFilters(); renderResults(); };
-$('#classSel').onchange = e => { filters.cls = e.target.value; renderResults(); };
+$('#classSel').onchange = e => { filters.cls = e.target.value; updateFilterBadge(); renderResults(); };
 let searchTimer;
 $('#searchBox').oninput = e => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { filters.q = e.target.value; renderResults(); }, 120); };
-$('#hoodSel').onchange = e => { filters.hood = e.target.value; renderResults(); };
-$('#daySel').onchange = e => { filters.day = e.target.value; renderResults(); };
+$('#hoodSel').onchange = e => { filters.hood = e.target.value; updateFilterBadge(); renderResults(); };
+$('#daySel').onchange = e => { filters.day = e.target.value; updateFilterBadge(); renderResults(); };
 
 function matches(s) {
   let min, max;
@@ -364,6 +365,23 @@ function matches(s) {
   }
   return true;
 }
+// The Filters button shows how many of its own filters are on
+function updateFilterBadge() {
+  const n = [filters.hood !== HOODS[0], filters.day !== 'all', filters.studio !== 'all', filters.cls !== 'all'].filter(Boolean).length;  // age and activity chips are always visible, so they aren't counted here
+  $('#filtCount').textContent = n ? ` · ${n}` : '';
+  $('#filtersBtn').classList.toggle('on', n > 0);
+}
+function setFilterPanel(open) {
+  $('#filterPanel').classList.toggle('hidden', !open);
+  $('#filtersBtn').setAttribute('aria-expanded', String(open));
+}
+$('#filtersBtn').onclick = () => setFilterPanel($('#filterPanel').classList.contains('hidden'));
+$('#showResults').onclick = () => {
+  setFilterPanel(false);
+  const target = exploreMode === 'map' ? $('#mapWrap') : $('#results');
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+if (window.innerWidth >= 760) setFilterPanel(true);   // roomy screens: filters start open
 const filtersActive = () => filters.age !== 'all' || filters.cat !== 'all' || filters.hood !== HOODS[0] || filters.day !== 'all'
   || filters.studio !== 'all' || filters.cls !== 'all' || !!filters.q.trim();
 function clearFilters() {
