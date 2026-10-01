@@ -53,14 +53,35 @@ Deno.serve(async (req) => {
         const inv = await stripe.invoices.retrieve((event.data.object as Stripe.Invoice).id);
         if (!inv.subscription) break;
         const synced = await syncSubscription(String(inv.subscription));
-        // New credits only for the first payment and each monthly renewal (not plan-change proration)
-        if (!synced || !synced.plan) break;
-        if (!['subscription_create', 'subscription_cycle'].includes(inv.billing_reason ?? '')) break;
-        const { error } = await db.rpc('grant_plan_credits', {
-          p_user: synced.userId, p_plan: synced.plan.id, p_credits: synced.plan.credits, p_ref: inv.id,
-          p_first: inv.billing_reason === 'subscription_create',
-        });
-        if (error) throw error;
+        if (!synced) break;
+        const reason = inv.billing_reason ?? '';
+
+        if (reason === 'subscription_create' || reason === 'subscription_cycle') {
+          // First payment: full credits. Monthly renewal: credits roll over up to 2x the plan.
+          if (!synced.plan) break;
+          const { error } = await db.rpc('grant_plan_credits', {
+            p_user: synced.userId, p_plan: synced.plan.id, p_credits: synced.plan.credits, p_ref: inv.id,
+            p_first: reason === 'subscription_create',
+          });
+          if (error) throw error;
+        } else if (reason === 'subscription_update') {
+          // Upgrade paid immediately: the proration invoice has a credit line (old plan) and a charge line (new plan).
+          const lines = inv.lines.data.filter((l) => l.proration);
+          const newPrice = lines.find((l) => l.amount > 0)?.price?.id;
+          const oldPrice = lines.find((l) => l.amount < 0)?.price?.id;
+          if (newPrice && oldPrice && newPrice !== oldPrice) {
+            const { data: np } = await db.from('plans').select('*').eq('stripe_price_id', newPrice).maybeSingle();
+            const { data: op } = await db.from('plans').select('*').eq('stripe_price_id', oldPrice).maybeSingle();
+            const extra = (np?.credits ?? 0) - (op?.credits ?? 0);
+            if (np && op && extra > 0) {
+              const { error } = await db.rpc('grant_plan_credits', {
+                p_user: synced.userId, p_plan: np.id, p_credits: extra, p_ref: inv.id,
+                p_first: true, p_reason: `Upgrade to ${np.name}: extra credits`,
+              });
+              if (error) throw error;
+            }
+          }
+        }
         break;
       }
     }

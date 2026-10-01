@@ -1,10 +1,11 @@
--- Fix: a new subscriber must always receive the plan's full credits.
+-- Fix: a new subscriber must always receive the plan's full credits, and upgrades add credits immediately.
 -- The rollover cap (2x plan credits) now applies only to monthly renewals.
 -- Run in Supabase > SQL Editor. Safe to run again.
 
 drop function if exists public.grant_plan_credits(uuid, text, int, text);
 
-create or replace function public.grant_plan_credits(p_user uuid, p_plan text, p_credits int, p_ref text, p_first boolean default false)
+create or replace function public.grant_plan_credits(p_user uuid, p_plan text, p_credits int, p_ref text,
+  p_first boolean default false, p_reason text default null)
 returns boolean language plpgsql security definer set search_path = public as $$
 declare old_c int; new_c int;
 begin
@@ -14,20 +15,22 @@ begin
   new_c := case when p_first then old_c + p_credits
                 else greatest(old_c, least(old_c + p_credits, 2 * p_credits)) end;
   insert into public.credit_ledger (user_id, delta, reason, ref)
-  values (p_user, new_c - old_c, 'Monthly credits: ' || p_plan, p_ref);
+  values (p_user, new_c - old_c, coalesce(p_reason, 'Monthly credits: ' || p_plan), p_ref);
   update public.profiles set credits = new_c, plan = p_plan where id = p_user;
   return true;
 end $$;
 
-revoke execute on function public.grant_plan_credits(uuid, text, int, text, boolean) from public, anon, authenticated;
-grant execute on function public.grant_plan_credits(uuid, text, int, text, boolean) to service_role;
+drop function if exists public.grant_plan_credits(uuid, text, int, text, boolean);
+revoke execute on function public.grant_plan_credits(uuid, text, int, text, boolean, text) from public, anon, authenticated;
+grant execute on function public.grant_plan_credits(uuid, text, int, text, boolean, text) to service_role;
 
 -- One-time correction for first payments that were recorded with 0 credits
 do $$
 declare r record; plan_credits int;
 begin
   for r in select * from public.credit_ledger
-           where delta = 0 and reason like 'Monthly credits: %' and ref like 'in\_%' loop
+           where delta = 0 and reason like 'Monthly credits: %' and ref like 'in\_%'
+             and not exists (select 1 from public.credit_ledger o where o.user_id = credit_ledger.user_id and o.created_at < credit_ledger.created_at) loop
     select credits into plan_credits from public.plans where id = replace(r.reason, 'Monthly credits: ', '');
     if plan_credits is null then continue; end if;
     insert into public.credit_ledger (user_id, delta, reason, ref)
