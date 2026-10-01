@@ -56,7 +56,7 @@ let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
 let adminPay = [], adminPayouts = [], adminPricing = null, adminReports = [];
-let studioPhotos = [], pastBookings = [], rvClassFilter = 'all';
+let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming';
 
 // ---------- Helpers ----------
 const $ = s => document.querySelector(s);
@@ -550,13 +550,36 @@ async function doReport(kind, id) {
 }
 
 // ---------- Views ----------
+function pastCard(b) {
+  const c = classes.find(x => x.id === b.class_id), st = studioById(b.studio_id), cat = CATS[c ? c.cat : 'all'];
+  const rv = reviews.find(r => r.user_id === user.id && r.class_id === b.class_id);
+  const date = new Date(b.session_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  return `<div class="card">
+    <div class="emoji" style="background:${cat.color}">${cat.emoji}</div>
+    <div>
+      <h3>${esc(b.class_title)}</h3>
+      <div class="meta">${st ? `<a class="lnk" data-studio="${esc(st.name)}">${esc(st.name)}</a><br>` : ''}🗓 ${date} · ${t12(b.session_time)}</div>
+      <div class="tags"><span class="tag">👶 ${esc(b.attendee_name)}</span>${rv ? `<span class="tag paid">✓ Reviewed ${starStr(rv.stars)}</span>` : ''}</div>
+    </div>
+    <div class="right"><div class="cost">⭐ ${b.credits}</div>
+      ${st && c ? `<button class="btn ${rv ? 'ghost' : ''}" data-goreview="${esc(st.name)}" data-cid="${c.id}">${rv ? 'Edit review' : 'Review'}</button>` : ''}</div></div>`;
+}
 function renderBookings() {
   if (!user) { $('#bookingList').innerHTML = `<div class="empty">Log in to see your classes.<br><button class="btn" style="margin-top:12px" data-login>Log in</button></div>`; return; }
+  const past = pastBookings.slice().sort((x, y) => (y.session_date + y.session_time).localeCompare(x.session_date + x.session_time));
+  const seg = `<div class="seg"><button data-bkview="upcoming" class="${bookView === 'upcoming' ? 'on' : ''}">Upcoming (${myBookings.length})</button><button data-bkview="past" class="${bookView === 'past' ? 'on' : ''}">Past (${past.length})</button></div>`;
+  if (bookView === 'past') {
+    const studiosN = new Set(past.map(b => b.studio_id)).size;
+    $('#bookingList').innerHTML = seg + (past.length
+      ? `<div class="meta" style="margin:4px 0 10px">${past.length} class${past.length === 1 ? '' : 'es'} attended at ${studiosN} studio${studiosN === 1 ? '' : 's'}</div><div class="grid">${past.map(pastCard).join('')}</div>`
+      : `<div class="empty">No past classes yet.<br>They'll show up here after you attend.</div>`);
+    return;
+  }
   const list = myBookings.map(sessionFromBooking)
-    .sort((a, b) => a.date - b.date || timeVal(a.time) - timeVal(b.time));
-  $('#bookingList').innerHTML = list.length
+    .sort((x, y) => x.date - y.date || timeVal(x.time) - timeVal(y.time));
+  $('#bookingList').innerHTML = seg + (list.length
     ? `<div class="grid">${list.map(s => card(s, 'booking')).join('')}</div>`
-    : `<div class="empty">No classes booked yet.<br><button class="btn" style="margin-top:12px" data-goexplore>Find a class</button></div>`;
+    : `<div class="empty">No upcoming classes.<br><button class="btn" style="margin-top:12px" data-goexplore>Find a class</button></div>`);
 }
 function renderPlans() {
   const cur = p => profile && profile.plan === p.id && profile.plan_started_at && Date.now() - new Date(profile.plan_started_at) < 30 * 864e5;
@@ -1105,6 +1128,13 @@ async function handleClick(e) {
   if ((el = hit('[data-hidereview]'))) { setReviewHidden(el.dataset.hidereview, el.dataset.to === 'true'); return; }
   if ((el = hit('[data-adminrmphoto]'))) { adminRemovePhoto(el.dataset.adminrmphoto); return; }
   if ((el = hit('[data-dismiss]'))) { await sb.from('reports').update({ resolved: true }).eq('id', el.dataset.dismiss); await refresh(); toast('Dismissed'); return; }
+  if ((el = hit('[data-bkview]'))) { bookView = el.dataset.bkview; renderBookings(); return; }
+  if ((el = hit('[data-goreview]'))) {
+    showStudio(el.dataset.goreview);
+    const sel = $('#rvClass');
+    if (sel) { sel.value = el.dataset.cid; prefillReview(); sel.closest('.panel').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    return;
+  }
   if (hit('[data-clearfilters]')) { clearFilters(); return; }
   if (hit('[data-goexplore]')) { showTab('explore'); return; }
   if (hit('[data-logout]')) { await sb.auth.signOut(); profile = null; renderNav(); showTab('explore'); toast('Logged out'); return; }
