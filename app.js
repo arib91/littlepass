@@ -57,7 +57,7 @@ let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
 let adminPay = [], adminPayouts = [], adminPricing = null, adminReports = [];
-let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [], locations = [];
+let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [], locations = [], exceptions = [];
 
 // ---------- Helpers ----------
 const $ = s => document.querySelector(s);
@@ -98,7 +98,7 @@ $('#modalBg').onclick = e => { if (e.target.id === 'modalBg' || e.target.dataset
 
 // ---------- Data ----------
 async function loadPublic() {
-  const [st, cl, sl, rv, ct, ch, ph, pl, lc] = await Promise.all([
+  const [st, cl, sl, rv, ct, ch, ph, pl, lc, ex] = await Promise.all([
     sb.from('studios').select('*'),
     sb.from('classes').select('*'),
     sb.from('class_slots').select('*'),
@@ -108,8 +108,10 @@ async function loadPublic() {
     sb.from('studio_photos').select('*').order('created_at'),
     sb.from('plans').select('*').order('sort'),
     sb.from('class_locations').select('*'),
+    sb.from('slot_exceptions').select('*'),
   ]);
   locations = lc.data || [];
+  exceptions = ex.data || [];
   studioPhotos = ph.data || [];
   plansDb = pl.data || [];
   if (typeof ch.data === 'number') cancelHours = ch.data;
@@ -154,12 +156,13 @@ async function refresh() {
 }
 
 // ---------- Sessions ----------
-const SESSIONS = [], PARTNERS = [];
+const SESSIONS = [], PARTNERS = [], CANCELLED = [];
 const studioById = id => studios.find(s => s.id === id);
 const studioByName = n => studios.find(s => s.name === n);
 const myStudio = () => user ? studios.find(s => s.owner_id === user.id) : null;
 function buildSessions() {
-  SESSIONS.length = 0; PARTNERS.length = 0;
+  SESSIONS.length = 0; PARTNERS.length = 0; CANCELLED.length = 0;
+  const off = new Map(exceptions.map(e => [`${e.slot_id}_${e.session_date}`, e]));
   const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
   slots.filter(sl => sl.active).forEach(sl => {
     const c = classes.find(x => x.id === sl.class_id), st = c && studioById(c.studio_id);
@@ -170,6 +173,7 @@ function buildSessions() {
       if (d.getDay() !== sl.dow) return;
       if (d.getTime() === today.getTime() && h * 60 + m <= nowMin) return; // already started
       const dateStr = fmt(d), id = `${sl.id}_${dateStr}`, taken = counts[id] || 0;
+      if (off.has(id)) { CANCELLED.push({ id, key: sl.id, studioId: st.id, title: c.title, date: d, dateStr, time: t12(sl.start_time), reason: off.get(id).reason }); return; }
       SESSIONS.push({ loc: locByClass(c.id), hasAddr: c.has_address, id, key: sl.id, classId: c.id, studioId: st.id, dateStr, title: c.title, studio: st.name, cat: c.cat, hood: c.hood,
         ageMin: c.age_min, ageMax: c.age_max, credits: sl.credits, priceCents: sl.price_cents, date: d,
         time: t12(sl.start_time), time24: String(sl.start_time).slice(0, 8), mins: sl.mins, capacity: sl.capacity, taken, spots: sl.capacity - taken });
@@ -805,9 +809,11 @@ function ownerOverview(el, st) {
       <div class="stat"><b>${money(S.upcoming)}</b>booked, coming up</div></div>
     <h3 style="margin:22px 0 8px">Next sessions</h3>
     ${sess.length ? `<div class="panel" style="margin-top:0">${sess.slice(0, 8).map(s => `<div class="sess">
-        <div><b>${esc(s.title)}</b><div class="meta">${dayName(s.date)} · ${s.time} · ${s.mins} min</div></div>
+        <div><b>${esc(s.title)}</b><div class="meta">${dayName(s.date)} · ${s.time} · ${s.mins} min</div>
+          <a class="lnk" style="font-size:13px" data-cancelsession="${s.key}|${s.dateStr}" data-n="${s.taken}">Cancel this session</a></div>
         <div style="text-align:right;min-width:90px"><b>${s.taken}/${s.capacity}</b> booked${bar(s.taken, s.capacity)}</div></div>`).join('')}</div>`
       : `<div class="panel"><p class="meta" style="margin:0">No sessions in the next 2 weeks. Add a class and time slots to get started.</p></div>`}
+    ${(() => { const mine = CANCELLED.filter(c => c.studioId === st.id).sort((a, b) => a.date - b.date); return mine.length ? `<h3 style="margin:22px 0 8px">Cancelled sessions</h3><div class="panel" style="margin-top:0">${mine.map(c => `<div class="sess"><div><b>${esc(c.title)}</b><div class="meta">${dayName(c.date)} · ${c.time}${c.reason ? ' · ' + esc(c.reason) : ''}</div></div><button class="btn ghost" data-restoresession="${c.key}|${c.dateStr}">Reopen</button></div>`).join('')}</div>` : ''; })()}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
       <button class="btn" data-goto="o-classes">Manage classes</button>
       <button class="btn ghost" data-goto="o-bookings">See bookings</button>
@@ -955,6 +961,18 @@ async function saveClassField(el) {
   if (error) { toast(error.message); return renderOwner(); }
   c[f] = v; buildSessions(); toast('Saved ✓');
 }
+async function cancelSessionUI(slotId, dateStr, taken) {
+  const reason = prompt(`Cancel this session?\n${taken ? `${taken} parent${taken > 1 ? 's' : ''} will be emailed and refunded automatically.` : 'Nobody has booked it yet.'}\n\nReason (shown to parents, optional):`, '');
+  if (reason === null) return;
+  const { data, error } = await sb.rpc('cancel_session', { p_slot: slotId, p_date: dateStr, p_reason: reason });
+  if (error) return toast(error.message);
+  await refresh(); toast(data ? `Session cancelled. ${data} parent${data > 1 ? 's' : ''} refunded and emailed.` : 'Session cancelled');
+}
+async function restoreSessionUI(slotId, dateStr) {
+  const { error } = await sb.rpc('restore_session', { p_slot: slotId, p_date: dateStr });
+  if (error) return toast(error.message);
+  await refresh(); toast('Session is open for booking again');
+}
 async function deleteSlot(id) {
   const n = upcomingForSlot(id).length;
   if (n && !confirm(`${n} upcoming booking${n > 1 ? 's' : ''} will be cancelled and the parents refunded. Delete this time slot?`)) return;
@@ -991,7 +1009,7 @@ function ownerBookingsView(el, st) {
     ${keys.length ? keys.slice(0, 60).map(k => {
       const g = groups[k], b0 = g[0], sl = slots.find(x => x.id === b0.slot_id);
       return `<div class="panel" style="margin-top:10px"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
-        <div><b>${esc(b0.class_title)}</b><div class="meta">${dateLabel(b0.session_date)} · ${t12(b0.session_time)}</div></div>
+        <div><b>${esc(b0.class_title)}</b><div class="meta">${dateLabel(b0.session_date)} · ${t12(b0.session_time)}</div>${bkFilter === 'upcoming' && b0.slot_id ? `<a class="lnk" style="font-size:13px" data-cancelsession="${b0.slot_id}|${b0.session_date}" data-n="${g.length}">Cancel this session</a>` : ''}</div>
         <div style="text-align:right;min-width:90px"><b>${g.length}${sl ? '/' + sl.capacity : ''}</b> booked${sl ? bar(g.length, sl.capacity) : ''}</div></div>
         ${g.map(b => `<div class="kid"><span style="font-size:22px">👶</span><div><b>${esc(b.attendee_name)}</b><div class="meta">Parent: ${esc(b.parent_name)}</div></div><div style="margin-left:auto" class="cost">${money(b.price_cents)}</div></div>`).join('')}</div>`;
     }).join('') : `<div class="empty">${bkFilter === 'upcoming' ? 'No upcoming bookings yet.' : 'No past bookings yet.'}</div>`}`;
@@ -1324,6 +1342,8 @@ async function handleClick(e) {
   if (hit('[data-savestudio]')) { saveStudio(); return; }
   if ((el = hit('[data-addsched]'))) { addSlots(el.dataset.addsched, el.closest('details')); return; }
   if ((el = hit('[data-rmslot]'))) { deleteSlot(el.dataset.rmslot); return; }
+  if ((el = hit('[data-cancelsession]'))) { const [sid, d] = el.dataset.cancelsession.split('|'); cancelSessionUI(sid, d, +el.dataset.n || 0); return; }
+  if ((el = hit('[data-restoresession]'))) { const [sid, d] = el.dataset.restoresession.split('|'); restoreSessionUI(sid, d); return; }
   if ((el = hit('[data-rmclass]'))) { deleteClass(el.dataset.rmclass); return; }
   if ((el = hit('[data-goto]'))) { showTab(el.dataset.goto); return; }
   if ((el = hit('[data-bkf]'))) { bkFilter = el.dataset.bkf; renderOwner(); return; }

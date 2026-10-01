@@ -95,6 +95,26 @@ async function handle(event: string, data: Record<string, string>) {
       { label: 'See your bookings', url: SITE }));
   }
 
+  if (event === 'booking_cancelled') {
+    // data comes straight from the database (the booking row is already deleted by the time we run)
+    const { data: st } = await db.from('studios').select('name, owner_id').eq('id', data.studio_id).single();
+    const when = `${day(data.session_date)} at ${time12(data.session_time)}`;
+    const parentTo = await emailOf(data.user_id);
+    if (data.by === 'parent') {
+      await send(parentTo, `Cancelled: ${data.class_title}`, layout('Your booking is cancelled',
+        `<p><b>${esc(data.class_title)}</b> with ${esc(st?.name)}<br>🗓 ${esc(when)}</p><p>⭐ ${esc(data.credits)} credits are back in your account.</p>`,
+        { label: 'Find another class', url: SITE }));
+      await send(await emailOf(st?.owner_id), `Booking cancelled: ${data.class_title}`, layout('A booking was cancelled',
+        `<p><b>${esc(data.attendee)}</b> (parent: ${esc(data.parent_name)}) cancelled <b>${esc(data.class_title)}</b>.</p><p>🗓 ${esc(when)}</p><p>That spot is open again.</p>`,
+        { label: 'See your bookings', url: SITE }));
+    } else {
+      const why = data.reason ? `<p><b>Reason:</b> ${esc(data.reason)}</p>` : '';
+      await send(parentTo, `Class cancelled: ${data.class_title}`, layout('Your class was cancelled',
+        `<p>We're sorry: <b>${esc(data.class_title)}</b> with ${esc(st?.name)} on ${esc(when)} has been cancelled.</p>${why}<p>⭐ ${esc(data.credits)} credits have been returned to your account, so you can book something else.</p>`,
+        { label: 'Find another class', url: SITE }));
+    }
+  }
+
   if (event === 'report_created') {
     const { data: r } = await db.from('reports').select('*').eq('id', data.report_id).single();
     if (!r) return;
