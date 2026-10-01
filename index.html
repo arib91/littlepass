@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>LittlePass San Diego | Baby & toddler classes</title>
 <meta name="description" content="Find and book baby and toddler classes across San Diego: swim, music, gym, art, sensory play and more. One membership, many studios.">
 <meta name="theme-color" content="#ff7a59">
@@ -274,6 +274,27 @@
   .contact { margin-top: 8px; font-size: 13px; padding: 8px 10px; background: #fbf7f2; border-radius: 10px; }
   .panel textarea { font: inherit; }
   .btn.danger { color: #c0392b; border-color: #f0cfca; }
+  /* ---------- Phones ---------- */
+  /* bigger hit area for inline text links, without changing the layout */
+  a.lnk { padding: 8px 0; }
+  .tags { align-items: center; }   /* keep tag pills their natural height next to a padded link */
+  .phdel { width: 36px; height: 36px; font-size: 16px; }
+  .consent input[type=checkbox] { width: 20px !important; height: 20px; flex: none; }
+  .slot input[type=checkbox] { width: 26px; height: 26px; }
+  /* iPhone home bar and notch */
+  nav.tabs { padding-bottom: env(safe-area-inset-bottom); }
+  .wrap { padding-bottom: calc(96px + env(safe-area-inset-bottom)); padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+  .toast { bottom: calc(90px + env(safe-area-inset-bottom)); }
+  #installTip { bottom: calc(84px + env(safe-area-inset-bottom)); }
+  .modal { max-height: 92dvh; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+  @media (max-width: 760px) {
+    /* iPhone zooms into any field under 16px, so keep every field at 16px on phones */
+    input, select, textarea, .slot input[type=number], .slot input[type=time], .slot select { font-size: 16px !important; }
+  }
+  @media (max-width: 360px) {
+    nav.tabs button { font-size: 11px; }
+    nav.tabs button .ico { font-size: 20px; }
+  }
   .legalfoot { text-align: center; font-size: 13px; color: var(--muted); margin-top: 36px; }
   .legalfoot a { color: var(--muted); }
   .hidden { display: none !important; }

@@ -20,3 +20,5 @@ ul { padding-left: 22px; }
 table { border-collapse: collapse; width:100%; font-size:14px; margin: 8px 0; }
 td, th { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
 th { background: rgba(255,122,89,.08); }
+
+@media (max-width: 600px) { table { display: block; overflow-x: auto; } .top { flex-wrap: wrap; } }
