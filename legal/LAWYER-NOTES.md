@@ -7,7 +7,7 @@ Anything in [BRACKETS] is a placeholder or an open decision. Nothing here has be
 - Marketplace: parents (18+) subscribe monthly and use **credits** to book baby/toddler classes run by **independent studios** in San Diego. Studios are approved by us before they go live.
 - **Plans**: Sprout $49/12 credits, Bloom $89/25, Grove $149/45 (monthly, auto-renewing via Stripe). Rollover while subscribed, capped at 2x the plan's credits; credits **expire when the subscription ends**. Upgrade = prorated charge + extra credits immediately; downgrade = at next renewal; cancel = end of billing period.
 - **Booking**: credits deducted at booking. Free cancellation until **24 hours** before class (credits returned); inside 24 hours no cancellation, no refund. Studio-initiated cancellation = full credit refund.
-- **Studios set a dollar price per time slot**; we convert to credits with an internal formula (margin is ours). Studio is paid its set price per **completed** booking (including late no-shows), by manual payout.
+- **Studios set a dollar price per time slot**; we convert to credits with an internal formula (margin is ours). Studio is paid its set price per **completed** booking (including late no-shows), by manual payout **once a month, at month end** (cutoff date TBD).
 - **Reviews**: only attendees can review; studios can reply but not edit/delete; we can hide reported content. **Photos**: studios upload; consent checkbox ("permission from parents/guardians of any children shown"); live immediately; reportable; we can remove.
 - **Addresses**: each class's address is either public or visible only to parents who booked.
 - **Children's data** we hold: first name + birthday, entered by the parent. Studios see the attending child's first name and parent's name for their bookings.
@@ -16,7 +16,7 @@ Anything in [BRACKETS] is a placeholder or an open decision. Nothing here has be
 ## Questions for the lawyer
 1. **Entity and name**: LLC formation; trademark search/clearance for "LittlePass" (similar marks: Little Passports; competitor KidPass).
 2. **Auto-renewal (California ARL)**: do our checkout disclosures, acknowledgement email, and cancellation flow comply? Is "credits expire when the subscription ends" lawful and clearly disclosed? Any gift-card/stored-value rules that apply to credits?
-3. **Refund policy**: partial-month refunds; what to do on account closure by us without cause.
+3. **Refund policy**: we decided on **no partial-month refunds** (confirm lawful and clearly disclosed); what to do on account closure by us without cause.
 4. **Liability for children's activities**: assumption-of-risk/waiver language; whether parents can validly waive on behalf of minors; whether studios must collect their own waivers; our limitation of liability and indemnity; need for our own insurance.
 5. **Marketplace role**: is the "independent studio" framing safe (classification, vicarious liability, "negligent selection" risk when we approve studios)? What vetting should we do and say (insurance proof, background checks)?
 6. **Children's privacy**: COPPA (we don't target children but hold child names/birthdays given by parents), CCPA/CPRA obligations, whether children's birthdays are "sensitive". Required notices and rights handling.

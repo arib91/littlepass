@@ -46,9 +46,9 @@ TERMS = '''
 <ul>
 <li><b>Upgrading:</b> takes effect immediately. You pay the prorated difference now and receive the additional credits right away.</li>
 <li><b>Downgrading:</b> takes effect at your next renewal date.</li>
-<li><b>Cancelling:</b> you can cancel any time online, under Plans, then "Manage subscription". Cancellation takes effect at the end of the current billing period, and you keep access until then. [DECISION: refunds for partial months. Suggested: none, except where required by law.]</li>
+<li><b>Cancelling:</b> you can cancel any time online, under Plans, then "Manage subscription". Cancellation takes effect at the end of the current billing period, and you keep access until then. <b>We don't refund partial months</b> or unused credits, except where the law requires it.</li>
 <li><b>Failed payments:</b> if a payment fails we may pause new credits until it's resolved.</li>
-<li><b>Price changes:</b> we'll tell you at least [30] days before a price change takes effect, and you may cancel before then.</li>
+<li><b>Price changes:</b> we'll tell you at least 30 days before a price change takes effect, and you may cancel before then.</li>
 </ul>
 <p>[LAWYER: confirm compliance with California's automatic renewal law: clear disclosure before purchase, affirmative consent, an acknowledgement email, and easy online cancellation.]</p>
 
@@ -155,7 +155,7 @@ PRIVACY = '''
 <p>We send transactional emails: account, booking, subscription and safety messages. We don't send marketing email unless you opt in. [DECISION: marketing emails and unsubscribe.]</p>
 
 <h2>7. How long we keep information</h2>
-<p>We keep your account information while your account is open. When you close it we delete or anonymise your personal information, except records we must keep for legal, tax or fraud-prevention reasons (such as payment and booking records, kept for [7] years). Reviews you wrote may stay in an anonymised form. [DECISION + LAWYER: confirm retention periods.]</p>
+<p>We keep your account information while your account is open. When you close it we delete or anonymise your personal information, except records we must keep for legal, tax or fraud-prevention reasons (such as payment and booking records, kept for 7 years). Reviews you wrote may stay in an anonymised form. [LAWYER: confirm retention periods.]</p>
 
 <h2>8. Your rights and choices</h2>
 <p>You can see and edit your account details and your children's details in the app. Depending on where you live (including California), you may also have the right to ask us to:</p>
@@ -213,8 +213,8 @@ STUDIO = '''
 <li>You set the <b>price you want to receive for each booking</b> of each time slot, in dollars.</li>
 <li>LittlePass converts that price to credits for parents using our own formula. You'll see the credit price for each slot. How many credits parents pay is our decision, and doesn't change the amount you are owed.</li>
 <li>You earn your price for each booking <b>once the class has taken place</b>. Bookings that parents cancel on time, or that you or we cancel, earn nothing. Bookings that parents can no longer cancel (inside 24 hours before the class), and no-shows, are still paid.</li>
-<li><b>Payouts:</b> we bundle completed, unpaid bookings into a payout and send it by [PAYMENT METHOD] [WITHIN X DAYS / MONTHLY]. Your dashboard shows what you've earned, what's been paid, and when. [DECISION: payout schedule and minimum.]</li>
-<li><b>Fees:</b> [DECISION: describe any platform fee. Currently, LittlePass earns the difference between what parents pay and the price you set.]</li>
+<li><b>Payouts:</b> we pay out <b>once a month, at the end of the month</b>, for bookings completed up to [CUTOFF DATE, e.g. the 25th] of that month. Anything completed after the cutoff goes into the next month's payout. We send payment by [PAYMENT METHOD, e.g. bank transfer or Zelle]. Your dashboard shows what you've earned, what's been paid, and when.</li>
+<li><b>Fees:</b> you always receive the price you set for each completed booking. LittlePass keeps the difference between what parents pay (in credits) and that price. There is no separate fee charged to studios.</li>
 <li><b>Taxes:</b> you're responsible for your own taxes. We may ask for tax information (for example a Form W-9) and may be required to report payments to tax authorities. [LAWYER/ACCOUNTANT: confirm reporting duties.]</li>
 <li>If a parent is refunded because of something you did, such as a cancelled class or an unsafe session, we may hold back or reverse the related payment.</li>
 </ul>
