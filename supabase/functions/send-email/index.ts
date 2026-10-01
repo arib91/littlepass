@@ -163,6 +163,27 @@ async function handle(event: string, data: Record<string, string>) {
       { label: 'See plans', url: SITE }));
   }
 
+  if (event === 'daily_summary') {
+    // numbers come from the database (send_daily_summary)
+    const d = data as unknown as Record<string, any>;
+    const errs = (d.errors ?? []) as { message: string; n: number; page: string }[];
+    const todo = [
+      d.studios_pending ? `🏢 ${d.studios_pending} studio${d.studios_pending === 1 ? '' : 's'} waiting for approval` : '',
+      d.reports_open ? `🚩 ${d.reports_open} open report${d.reports_open === 1 ? '' : 's'}` : '',
+      d.past_due ? `💳 ${d.past_due} parent${d.past_due === 1 ? '' : 's'} with a failed payment` : '',
+      d.failed_emails ? `✉️ ${d.failed_emails} email${d.failed_emails === 1 ? '' : 's'} failed to send in the last 24h` : '',
+    ].filter(Boolean);
+    const row = (label: string, v: unknown) => `<tr><td style="padding:4px 12px 4px 0;color:#7a7483">${label}</td><td style="padding:4px 0;font-weight:700">${esc(v)}</td></tr>`;
+    const subject = errs.length ? `⚠️ LittlePass: ${errs.reduce((a, e) => a + e.n, 0)} app error(s) yesterday`
+      : `LittlePass daily: ${d.bookings} booking${d.bookings === 1 ? '' : 's'}, ${d.new_parents} new famil${d.new_parents === 1 ? 'y' : 'ies'}`;
+    await send(ADMIN, subject, layout(`Yesterday, ${day(d.day)}`,
+      `<table style="border-collapse:collapse;font-size:15px">${row('Visits', d.visits)}${row('New families', d.new_parents)}${row('New subscribers', d.new_subscribers)}
+        ${row('Classes booked', d.bookings)}${row('Cancellations', d.cancellations)}${row('Active subscribers now', d.subscribers)}${row('Classes on the schedule today', d.today_bookings)}</table>
+       ${todo.length ? `<p style="margin-top:16px"><b>Needs your attention</b><br>${todo.join('<br>')}</p>` : ''}
+       ${errs.length ? `<p style="margin-top:16px"><b>App errors in the last 24h</b> (what broke in someone's browser)</p><ul>${errs.map((e) => `<li>${esc(e.message)} <span style="color:#7a7483">· ${e.n}× · ${esc(e.page)}</span></li>`).join('')}</ul><p style="color:#7a7483">Paste these into your chat with Claude to get them fixed.</p>` : '<p style="color:#7a7483;margin-top:16px">✅ No app errors.</p>'}`,
+      { label: 'Open the admin stats', url: SITE }));
+  }
+
   if (event === 'report_created') {
     const { data: r } = await db.from('reports').select('*').eq('id', data.report_id).single();
     if (!r) return;

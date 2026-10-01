@@ -5,6 +5,36 @@ const SB_URL = 'https://nktwkktslnvredjkqzjq.supabase.co';
 const SB_KEY = 'sb_publishable_943cWL3ht_oICvddIanYGw_moFzaMnh'; // publishable key: safe in the browser
 const sb = window.supabase.createClient(SB_URL, SB_KEY);
 
+// ---------- Private analytics + error reports ----------
+// No cookies and no IP addresses: a visit is a random id that lives only in this browser tab. Nothing is sent while testing locally.
+const LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+const SESSION = (() => {
+  try { let id = sessionStorage.getItem('lp-s'); if (!id) { id = crypto.randomUUID(); sessionStorage.setItem('lp-s', id); } return id; }
+  catch (e) { return String(Math.random()).slice(2); }
+})();
+const tracked = new Set();
+function track(name, studioId = null) {
+  const key = name + (studioId || '');
+  if (LOCAL || tracked.has(key)) return;
+  tracked.add(key);
+  sb.from('events').insert({ name, studio_id: studioId, session: SESSION }).then(() => {}, () => {});
+}
+// Crashes in someone's browser land in the admin Stats tab and the morning email (at most 5 per visit)
+const errorSeen = new Set();
+function reportError(message, source) {
+  message = String(message || 'Unknown error').slice(0, 500);
+  if (LOCAL || errorSeen.size >= 5 || errorSeen.has(message) || /ResizeObserver loop|^Script error\.?$/.test(message)) return;
+  if (source && !source.startsWith(location.origin) && !/cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net/.test(source)) return;  // browser extensions, not us
+  errorSeen.add(message);
+  sb.from('client_errors').insert({ message, source: (source || '').slice(0, 300), page: (location.pathname + location.hash).slice(0, 200),
+    user_agent: navigator.userAgent.slice(0, 300), session: SESSION }).then(() => {}, () => {});
+}
+window.addEventListener('error', e => reportError(e.message, e.filename));
+window.addEventListener('unhandledrejection', e => reportError('Unhandled: ' + ((e.reason && e.reason.message) || e.reason), ''));
+// Same rule as the studio pages on the server (netlify/lib/studio-page.js)
+const slugify = name => String(name).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
 // ---------- Static data ----------
 const AGES = [
   { id: 'all',  label: 'All ages', min: 0,  max: 72 },
@@ -60,7 +90,7 @@ let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentS
 let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
-let adminUsers = [], adminAudit = [], peopleQ = '', peopleRole = 'all', myLedger = [], histAll = false, editKid = null, editName = false;
+let adminStats = null, adminUsers = [], adminAudit = [], peopleQ = '', peopleRole = 'all', myLedger = [], histAll = false, editKid = null, editName = false;
 let adminPay = [], adminPayouts = [], adminPricing = null, adminReports = [];
 let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [], locations = [], exceptions = [], contacts = [];
 
@@ -128,7 +158,7 @@ async function loadPublic() {
   (ct.data || []).forEach(r => { counts[`${r.slot_id}_${r.session_date}`] = Number(r.taken); });
 }
 async function loadPrivate() {
-  kids = []; myBookings = []; myWaitlist = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null; adminReports = []; pastBookings = []; adminUsers = []; adminAudit = []; myLedger = [];
+  kids = []; myBookings = []; myWaitlist = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null; adminReports = []; pastBookings = []; adminUsers = []; adminAudit = []; myLedger = []; adminStats = null;
   if (!user) { profile = null; return; }
   profile = (await sb.from('profiles').select('*').eq('id', user.id).single()).data;
   if (profile && profile.role === 'admin') {
@@ -256,7 +286,7 @@ const isStudioUser = () => !!(user && profile && profile.role === 'studio');
 function renderNav() {
   const pend = adminStudios.filter(s => s.status === 'pending').length;
   const items = isAdmin()
-    ? [['a-studios', '🏢', 'Studios' + (pend ? ` (${pend})` : '')], ['a-people', '👥', 'People'], ['a-payouts', '💸', 'Payouts' + (adminPayouts.some(p => p.status === 'pending') ? ' •' : '')], ['a-pricing', '🧮', 'Pricing'], ['a-reports', '🚩', 'Reports' + (adminReports.length ? ` (${adminReports.length})` : '')], ['a-account', '⚙️', 'Account']]
+    ? [['a-stats', '📊', 'Stats'], ['a-studios', '🏢', 'Studios' + (pend ? ` (${pend})` : '')], ['a-people', '👥', 'People'], ['a-payouts', '💸', 'Payouts' + (adminPayouts.some(p => p.status === 'pending') ? ' •' : '')], ['a-reports', '🚩', 'Reports' + (adminReports.length ? ` (${adminReports.length})` : '')], ['a-account', '⚙️', 'Account']]
     : isStudioUser()
     ? [['o-overview', '📊', 'Overview'], ['o-classes', '📚', 'Classes'], ['o-bookings', '📅', 'Bookings'], ['o-page', '🖼️', 'Page'], ['o-earnings', '💰', 'Earnings'], ['o-account', '⚙️', 'Account']]
     : [['explore', '🔍', 'Explore'], ['bookings', '📅', 'My classes'], ['plans', '⭐', 'Plans'], ['profile', '👶', 'Family']];
@@ -286,6 +316,7 @@ $('#ownerBtn').onclick = () => showTab('owner');
 // ---------- Auth ----------
 function openAuth(mode = 'login', reason = '', role = authState.role) {
   authState = { mode, role, reason };
+  if (mode === 'signup') track('start_signup');
   const su = mode === 'signup';
   openModal(`
     <h2>${su ? 'Create your account' : 'Welcome back'}</h2>
@@ -571,6 +602,7 @@ const hash = t => [...t].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
 const starStr = n => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
 function showStudio(name, fromHash) {
   currentStudio = name; renderStudio(); showTab('studio');
+  { const st = studioByName(name); if (st) track('view_studio', st.id); }
   document.title = `${name} | LittlePass`;
   const h = '#studio/' + encodeURIComponent(name);
   if (!fromHash && location.hash !== h) location.hash = h;   // makes the studio page a shareable link
@@ -663,7 +695,9 @@ function renderStudio() {
     ${reviewFormHtml(st)}`;
 }
 async function shareStudio() {
-  const url = location.href, title = `${currentStudio} on LittlePass`;
+  // the studio's own page has a proper link preview (photo, classes, rating)
+  const url = `${location.origin}/studios/${slugify(currentStudio)}`, title = `${currentStudio} on LittlePass`;
+  const st = studioByName(currentStudio); if (st) track('share', st.id);
   try {
     if (navigator.share) { await navigator.share({ title, url }); return; }
     await navigator.clipboard.writeText(url); toast('Link copied 🔗');
@@ -837,6 +871,7 @@ async function callFunction(name, body) {
 }
 async function startCheckout(planId) {
   if (!user) return openAuth('login', 'Log in or sign up to subscribe.');
+  track('start_checkout');
   toast('Opening secure checkout…');
   try { const d = await callFunction('create-checkout', { plan: planId }); location.href = d.url; }
   catch (e) { toast(e.message); }
@@ -1334,6 +1369,8 @@ function renderAdmin() {
   if (!isAdmin()) { el.innerHTML = '<div class="empty">Admins only.</div>'; return; }
   if (adminTab === 'account') {
     el.innerHTML = `<h2 style="margin:24px 0 4px">Account</h2><div class="panel"><div class="label">Admin login</div><div class="meta" style="margin-bottom:12px">${esc(user.email)}</div><button class="btn ghost" data-logout>Log out</button></div>
+      <div class="panel"><div class="label">Pricing</div><div class="meta" style="margin-bottom:8px">Credit value, your margin, the most a class can cost and the cancellation window.</div>
+        <button class="btn ghost" data-goto="a-pricing">🧮 Pricing settings</button></div>
       <div class="panel"><div class="label">Download as a spreadsheet (CSV)</div>
         <div class="meta" style="margin-bottom:8px">Opens in Excel, Numbers or Google Sheets. Handy for your accountant.</div>
         <div style="display:flex;flex-wrap:wrap;gap:8px">${[['people', 'People'], ['bookings', 'All bookings'], ['payouts', 'Payouts'], ['credits', 'Credit history'], ['activity', 'Admin activity']]
@@ -1345,6 +1382,7 @@ function renderAdmin() {
     return;
   }
   if (adminTab === 'people') return renderAdminPeople(el);
+  if (adminTab === 'stats') return renderAdminStats(el);
   if (adminTab === 'payouts') return renderAdminPayouts(el);
   if (adminTab === 'pricing') return renderAdminPricing(el);
   if (adminTab === 'reports') return renderAdminReports(el);
@@ -1354,6 +1392,47 @@ function renderAdmin() {
     <div class="seg" style="flex-wrap:wrap">${[['pending', `Pending (${n('pending')})`], ['approved', `Approved (${n('approved')})`], ['rejected', `Rejected (${n('rejected')})`], ['all', 'All']].map(([k, l]) => `<button data-adminf="${k}" class="${adminFilter === k ? 'on' : ''}">${l}</button>`).join('')}</div>
     ${list.length ? list.map(adminCard).join('') : `<div class="empty">${adminFilter === 'pending' ? 'No studios waiting for approval 🎉' : 'Nothing here.'}</div>`}`;
 }
+// ----- Admin: stats -----
+async function loadAdminStats() {
+  const { data, error } = await sb.rpc('admin_stats');
+  if (error) { toast(error.message); return; }
+  adminStats = data; if (currentView === 'admin' && adminTab === 'stats') renderAdmin();
+}
+function renderAdminStats(el) {
+  if (!adminStats) { el.innerHTML = '<h2 style="margin:24px 0 4px">Stats</h2><div class="empty">Crunching numbers… 📊</div>'; loadAdminStats(); return; }
+  const S = adminStats, N = S.now, F = S.funnel_30d;
+  const pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '–';
+  const maxB = Math.max(1, ...S.weeks.map(w => Math.max(w.bookings, w.visits, w.new_parents)));
+  const bar = (v, color) => `<span style="display:inline-block;height:8px;border-radius:4px;background:${color};width:${Math.max(v ? 4 : 0, Math.round(70 * v / maxB))}px;vertical-align:middle;margin-right:4px"></span>${v}`;
+  const steps = [['Visited', F.visits], ['Looked at a studio', F.viewed_studio], ['Started signing up', F.started_signup], ['Signed up', F.signed_up],
+    ['Started checkout', F.started_checkout], ['Subscribed', F.subscribed], ['Booked a class', F.booked]];
+  el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin:24px 0 4px"><h2 style="margin:0">Stats</h2><button class="btn ghost" data-refreshstats>↻ Refresh</button></div>
+    <p class="meta" style="margin:0">Visit tracking started Oct 1, 2026. Your own visits on the live site count too.</p>
+    <div class="stats">
+      <div class="stat"><b>${N.subscribers}</b>active subscribers${N.past_due ? `<div class="meta low">${N.past_due} payment failed</div>` : ''}</div>
+      <div class="stat"><b>${money(N.mrr_cents)}</b>monthly revenue</div>
+      <div class="stat"><b>${N.parents}</b>families signed up</div>
+      <div class="stat"><b>${N.studios_live}</b>live studios${N.studios_pending ? `<div class="meta">${N.studios_pending} waiting</div>` : ''}</div>
+      <div class="stat"><b>${N.upcoming_bookings}</b>bookings, next 14 days<div class="meta">${pct(N.upcoming_bookings, N.seats_next_14)} of ${N.seats_next_14} spots</div></div>
+      <div class="stat"><b>${N.waitlist}</b>on waitlists</div></div>
+    <div class="panel"><div class="label">Money to keep an eye on</div>
+      <div class="hist"><div>Unused credits families hold<div class="meta">What you'd pay studios if every credit got used</div></div><b>⭐ ${N.credits_outstanding} ≈ ${money(N.credits_outstanding_cost_cents)}</b></div>
+      <div class="hist"><div>Owed to studios<div class="meta">Classes already held, not paid out yet</div></div><b>${money(N.owed_to_studios_cents)}</b></div>
+      ${Object.keys(N.by_plan || {}).length ? `<div class="hist"><div>Subscribers by plan</div><b>${Object.entries(N.by_plan).map(([k, v]) => `${esc(k)} ${v}`).join(' · ')}</b></div>` : ''}</div>
+    <div class="panel"><div class="label">Last 8 weeks</div><div style="overflow-x:auto"><table class="wk"><tr><th>Week of</th><th>Visits</th><th>New families</th><th>Bookings</th><th>Cancelled</th></tr>
+      ${S.weeks.slice().reverse().map(w => `<tr><td>${dateLabel(w.week).replace(/^\w+, /, '')}</td><td>${bar(w.visits, '#c9c3d6')}</td><td>${bar(w.new_parents, '#7cc4a4')}</td><td>${bar(w.bookings, 'var(--brand)')}</td><td>${w.cancellations}</td></tr>`).join('')}</table></div></div>
+    <div class="panel"><div class="label">From visit to booking, last 30 days</div>
+      ${steps.map(([l, v]) => `<div class="hist"><div>${l}</div><b>${v} <span class="meta" style="font-weight:600">${pct(v, F.visits)}</span></b></div>`).join('')}
+      <p class="meta" style="margin:8px 0 0">Percentages are of visits. Families who signed up before Oct 1 aren't linked to a visit.</p></div>
+    ${S.top_classes_30d.length ? `<div class="panel"><div class="label">Most booked classes, last 30 days</div>${S.top_classes_30d.map(t => `<div class="hist"><div>${esc(t.title)}<div class="meta">${esc(t.studio)}</div></div><b>${t.n}</b></div>`).join('')}</div>` : ''}
+    ${S.top_studios_viewed_30d.length ? `<div class="panel"><div class="label">Most viewed studios, last 30 days</div>${S.top_studios_viewed_30d.map(t => `<div class="hist"><div>${esc(t.studio)}</div><b>${t.n}</b></div>`).join('')}</div>` : ''}
+    <div class="panel"><div class="label">Health, last 7 days</div>
+      <div class="hist"><div>App errors in people's browsers</div><b class="${S.errors_7d ? 'low' : 'plus'}">${S.errors_7d}</b></div>
+      <div class="hist"><div>Emails that failed to send</div><b class="${S.failed_emails_7d ? 'low' : 'plus'}">${S.failed_emails_7d}</b></div>
+      ${S.recent_errors.map(e => `<div class="meta" style="padding:6px 0;border-top:1px solid var(--line)"><b>${esc(e.message)}</b><br>${e.n}× · last ${fmtDate(e.last_seen)} · ${esc(e.page || '')}</div>`).join('')}
+      <p class="meta" style="margin:8px 0 0">You also get a summary email every morning around 8am.</p></div>`;
+}
+
 // ----- Admin: people -----
 const AUDIT = { credits_adjusted: 'Credits adjusted', booking_refunded: 'Booking refunded', studio_approved: 'Studio approved', studio_rejected: 'Studio rejected or suspended',
   studio_pending: 'Studio set back to pending', studio_closed: 'Studio closed', pricing_changed: 'Pricing changed', payout_created: 'Payout created', payout_paid: 'Payout marked paid',
@@ -1631,6 +1710,7 @@ async function handleClick(e) {
   if ((el = hit('[data-rmclass]'))) { deleteClass(el.dataset.rmclass); return; }
   if ((el = hit('[data-goto]'))) { showTab(el.dataset.goto); return; }
   if ((el = hit('[data-bkf]'))) { bkFilter = el.dataset.bkf; renderOwner(); return; }
+  if (hit('[data-refreshstats]')) { adminStats = null; renderAdmin(); return; }
   if ((el = hit('[data-peoplerole]'))) { peopleRole = el.dataset.peoplerole; renderAdmin(); return; }
   if ((el = hit('[data-adjust]'))) { adjustCredits(el.dataset.adjust); return; }
   if ((el = hit('[data-arefund]'))) { adminRefund(el.dataset.arefund, el.dataset.personId); return; }
@@ -1811,6 +1891,7 @@ renderAll();
   try { await loadPublic(); }
   catch (err) { $('#results').innerHTML = `<div class="empty">Couldn't load classes. Please refresh.<br><small>${esc(err.message || err)}</small></div>`; return; }
   loaded = true; buildSessions(); renderAll();
+  track('visit');
   { const m = location.hash.match(/^#studio\/(.+)$/); if (m && studioByName(decodeURIComponent(m[1]))) showStudio(decodeURIComponent(m[1]), true); }
   const co = new URLSearchParams(location.search).get('checkout');
   if (co) { history.replaceState(null, '', location.pathname); afterCheckout(co); }
