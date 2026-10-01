@@ -60,6 +60,7 @@ let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentS
 let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
+let adminUsers = [], adminAudit = [], peopleQ = '', peopleRole = 'all', myLedger = [], histAll = false, editKid = null, editName = false;
 let adminPay = [], adminPayouts = [], adminPricing = null, adminReports = [];
 let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [], locations = [], exceptions = [], contacts = [];
 
@@ -127,13 +128,15 @@ async function loadPublic() {
   (ct.data || []).forEach(r => { counts[`${r.slot_id}_${r.session_date}`] = Number(r.taken); });
 }
 async function loadPrivate() {
-  kids = []; myBookings = []; myWaitlist = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null; adminReports = []; pastBookings = [];
+  kids = []; myBookings = []; myWaitlist = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null; adminReports = []; pastBookings = []; adminUsers = []; adminAudit = []; myLedger = [];
   if (!user) { profile = null; return; }
   profile = (await sb.from('profiles').select('*').eq('id', user.id).single()).data;
   if (profile && profile.role === 'admin') {
-    const [s, p, pr, po, rp] = await Promise.all([sb.rpc('admin_list_studios'), sb.rpc('admin_payout_summary'),
+    const [s, p, pr, po, rp, us, au] = await Promise.all([sb.rpc('admin_list_studios'), sb.rpc('admin_payout_summary'),
       sb.rpc('admin_get_pricing'), sb.from('payouts').select('*').order('created_at', { ascending: false }),
-      sb.from('reports').select('*').eq('resolved', false).order('created_at', { ascending: false })]);
+      sb.from('reports').select('*').eq('resolved', false).order('created_at', { ascending: false }),
+      sb.rpc('admin_list_users'), sb.from('admin_audit').select('*').order('created_at', { ascending: false }).limit(30)]);
+    adminUsers = us.data || []; adminAudit = au.data || [];
     adminReports = rp.data || [];
     adminStudios = s.data || []; adminPay = p.data || []; adminPricing = (pr.data || [])[0] || null; adminPayouts = po.data || [];
     return;
@@ -148,12 +151,13 @@ async function loadPrivate() {
       studioBookings = b.data || []; payouts = po.data || [];
     }
   } else {
-    const [k, b, w] = await Promise.all([
+    const [k, b, w, l] = await Promise.all([
       sb.from('kids').select('*').order('created_at'),
       sb.from('bookings').select('*').eq('user_id', user.id),
       sb.rpc('my_waitlist'),
+      sb.from('credit_ledger').select('delta, reason, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(200),
     ]);
-    const mine = b.data || []; myWaitlist = w.data || [];
+    const mine = b.data || []; myWaitlist = w.data || []; myLedger = l.data || [];
     kids = k.data || []; myBookings = mine.filter(x => x.session_date >= todayStr); pastBookings = mine.filter(x => x.session_date < todayStr);
   }
 }
@@ -252,7 +256,7 @@ const isStudioUser = () => !!(user && profile && profile.role === 'studio');
 function renderNav() {
   const pend = adminStudios.filter(s => s.status === 'pending').length;
   const items = isAdmin()
-    ? [['a-studios', '🏢', 'Studios' + (pend ? ` (${pend})` : '')], ['a-payouts', '💸', 'Payouts' + (adminPayouts.some(p => p.status === 'pending') ? ' •' : '')], ['a-pricing', '🧮', 'Pricing'], ['a-reports', '🚩', 'Reports' + (adminReports.length ? ` (${adminReports.length})` : '')], ['a-account', '⚙️', 'Account']]
+    ? [['a-studios', '🏢', 'Studios' + (pend ? ` (${pend})` : '')], ['a-people', '👥', 'People'], ['a-payouts', '💸', 'Payouts' + (adminPayouts.some(p => p.status === 'pending') ? ' •' : '')], ['a-pricing', '🧮', 'Pricing'], ['a-reports', '🚩', 'Reports' + (adminReports.length ? ` (${adminReports.length})` : '')], ['a-account', '⚙️', 'Account']]
     : isStudioUser()
     ? [['o-overview', '📊', 'Overview'], ['o-classes', '📚', 'Classes'], ['o-bookings', '📅', 'Bookings'], ['o-page', '🖼️', 'Page'], ['o-earnings', '💰', 'Earnings'], ['o-account', '⚙️', 'Account']]
     : [['explore', '🔍', 'Explore'], ['bookings', '📅', 'My classes'], ['plans', '⭐', 'Plans'], ['profile', '👶', 'Family']];
@@ -865,19 +869,36 @@ function renderProfile() {
   const isStudio = profile && profile.role === 'studio';
   el.innerHTML = `<h2 style="margin-top:24px">${isStudio ? 'My account' : 'My family'}</h2>
     <div class="panel"><div class="label">Account</div>
-      <div><b>${esc(profile ? profile.display_name : '')}</b> · ${isStudio ? '🏢 Studio' : '👶 Parent'}</div>
+      ${editName ? `<input id="myName" maxlength="60" value="${esc(profile ? profile.display_name || '' : '')}" placeholder="Your name">
+        <div class="meta" style="margin:-4px 0 10px">Studios see this name on your bookings.</div>
+        <button class="btn" data-savename>Save</button> <button class="btn ghost" data-editname="0">Cancel</button>`
+      : `<div><b>${esc(profile ? profile.display_name : '')}</b> · ${isStudio ? '🏢 Studio' : '👶 Parent'} · <a class="lnk" data-editname="1">Edit name</a></div>
       <div class="meta" style="margin-bottom:12px">${esc(user.email)}</div>
-      <button class="btn ghost" data-logout>Log out</button></div>
-    ${yourDataPanel()}
+      <button class="btn ghost" data-logout>Log out</button>`}</div>
     ${isStudio ? '' : `<div class="panel">
       <div class="label">Add a child</div><input id="kidName" placeholder="Name">
       <div class="label">Birthday</div><input id="kidBday" type="date">
       <button class="btn" data-addkid>Add child</button></div>
     <div class="panel"><div class="label">Your kids</div>${kids.length ? kids.map(k => {
       const m = monthsOld(k.birthday);
+      if (editKid === k.id) return `<div class="kid" style="flex-wrap:wrap"><input id="ekName" maxlength="60" value="${esc(k.name)}" style="flex:1 1 140px;margin:0">
+        <input id="ekBday" type="date" value="${esc(k.birthday)}" style="flex:1 1 140px;margin:0">
+        <button class="btn" data-savekid="${k.id}">Save</button><button class="btn ghost" data-editkid="">Cancel</button></div>`;
       return `<div class="kid"><span style="font-size:24px">👶</span><div><b>${esc(k.name)}</b><div class="meta">${m < 24 ? m + ' months' : Math.floor(m / 12) + ' years'} old</div></div>
-        <button class="btn ghost" style="margin-left:auto" data-rmkid="${k.id}">Remove</button></div>`;
-    }).join('') : `<p class="meta">Add your child and we'll show classes for their exact age.</p>`}</div>`}`;
+        <span style="margin-left:auto;display:flex;gap:6px"><button class="btn ghost" data-editkid="${k.id}">Edit</button><button class="btn ghost" data-rmkid="${k.id}">Remove</button></span></div>`;
+    }).join('') : `<p class="meta">Add your child and we'll show classes for their exact age.</p>`}</div>
+    ${creditHistoryPanel()}`}
+    ${yourDataPanel()}`;
+}
+
+// Every credit in and out: plan payments, bookings, refunds, adjustments
+function creditHistoryPanel() {
+  const rows = histAll ? myLedger : myLedger.slice(0, 8);
+  return `<div class="panel"><div class="label">Credit history</div>
+    <div class="meta" style="margin-bottom:4px">Balance now: <b>⭐ ${profile ? profile.credits : 0}</b></div>
+    ${rows.length ? rows.map(l => `<div class="hist"><div><div>${esc(l.reason)}</div><div class="meta">${fmtDate(l.created_at)}</div></div>
+      <b class="${l.delta > 0 ? 'plus' : ''}">${l.delta > 0 ? '+' : ''}${l.delta}</b></div>`).join('') : '<p class="meta">No credit activity yet.</p>'}
+    ${myLedger.length > 8 ? `<button class="btn ghost" style="margin-top:8px" data-histall>${histAll ? 'Show less' : `Show all (${myLedger.length})`}</button>` : ''}</div>`;
 }
 
 // ---------- Studio area ----------
@@ -1312,9 +1333,18 @@ function renderAdmin() {
   const el = $('#view-admin');
   if (!isAdmin()) { el.innerHTML = '<div class="empty">Admins only.</div>'; return; }
   if (adminTab === 'account') {
-    el.innerHTML = `<h2 style="margin:24px 0 4px">Account</h2><div class="panel"><div class="label">Admin login</div><div class="meta" style="margin-bottom:12px">${esc(user.email)}</div><button class="btn ghost" data-logout>Log out</button></div>${yourDataPanel()}`;
+    el.innerHTML = `<h2 style="margin:24px 0 4px">Account</h2><div class="panel"><div class="label">Admin login</div><div class="meta" style="margin-bottom:12px">${esc(user.email)}</div><button class="btn ghost" data-logout>Log out</button></div>
+      <div class="panel"><div class="label">Download as a spreadsheet (CSV)</div>
+        <div class="meta" style="margin-bottom:8px">Opens in Excel, Numbers or Google Sheets. Handy for your accountant.</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">${[['people', 'People'], ['bookings', 'All bookings'], ['payouts', 'Payouts'], ['credits', 'Credit history'], ['activity', 'Admin activity']]
+          .map(([k, l]) => `<button class="btn ghost" data-export="${k}">⬇ ${l}</button>`).join('')}</div></div>
+      <div class="panel"><div class="label">Recent admin activity</div>
+        ${adminAudit.length ? adminAudit.map(a => `<div class="hist"><div><div>${esc(AUDIT[a.action] || a.action)}${a.target ? ` · <b>${esc(a.target)}</b>` : ''}</div>
+          <div class="meta">${auditDetail(a)}</div></div><span class="meta" style="white-space:nowrap">${fmtDate(a.created_at)}</span></div>`).join('') : '<p class="meta">Nothing yet. Approvals, payouts, price changes, credit adjustments and refunds show up here.</p>'}</div>
+      ${yourDataPanel()}`;
     return;
   }
+  if (adminTab === 'people') return renderAdminPeople(el);
   if (adminTab === 'payouts') return renderAdminPayouts(el);
   if (adminTab === 'pricing') return renderAdminPricing(el);
   if (adminTab === 'reports') return renderAdminReports(el);
@@ -1324,6 +1354,99 @@ function renderAdmin() {
     <div class="seg" style="flex-wrap:wrap">${[['pending', `Pending (${n('pending')})`], ['approved', `Approved (${n('approved')})`], ['rejected', `Rejected (${n('rejected')})`], ['all', 'All']].map(([k, l]) => `<button data-adminf="${k}" class="${adminFilter === k ? 'on' : ''}">${l}</button>`).join('')}</div>
     ${list.length ? list.map(adminCard).join('') : `<div class="empty">${adminFilter === 'pending' ? 'No studios waiting for approval 🎉' : 'Nothing here.'}</div>`}`;
 }
+// ----- Admin: people -----
+const AUDIT = { credits_adjusted: 'Credits adjusted', booking_refunded: 'Booking refunded', studio_approved: 'Studio approved', studio_rejected: 'Studio rejected or suspended',
+  studio_pending: 'Studio set back to pending', studio_closed: 'Studio closed', pricing_changed: 'Pricing changed', payout_created: 'Payout created', payout_paid: 'Payout marked paid',
+  payout_pending: 'Payout set back to pending', review_hidden: 'Review hidden', review_shown: 'Review shown again' };
+function auditDetail(a) {
+  const d = a.details || {};
+  if (a.action === 'credits_adjusted') return `${d.delta > 0 ? '+' : ''}${esc(d.delta)} credits · “${esc(d.reason)}” · new balance ${esc(d.new_balance)}`;
+  if (a.action === 'booking_refunded') return `${esc(d.class)} on ${esc(d.date)} (${esc(d.attendee)}) · ⭐ ${esc(d.credits)}${d.reason ? ` · “${esc(d.reason)}”` : ''}`;
+  if (a.action.startsWith('payout')) return money(d.amount_cents || 0) + (d.reference ? ` · ref ${esc(d.reference)}` : '');
+  if (a.action === 'pricing_changed' && d.to) return `credit value ${money(d.to.credit_value_cents)} · margin ${esc(d.to.margin_pct)}% · cancel ${esc(d.to.cancel_hours)}h`;
+  if (d.note) return '“' + esc(d.note) + '”';
+  return '';
+}
+const ROLE = { parent: '👶 Parent', studio: '🏢 Studio', admin: '🛡 Admin' };
+function peopleList() {
+  const q = peopleQ.toLowerCase();
+  return adminUsers.filter(u => (peopleRole === 'all' || u.role === peopleRole)
+      && (!q || [u.email, u.display_name, u.studio_name].some(x => (x || '').toLowerCase().includes(q))));
+}
+function peopleRows() {
+  const list = peopleList();
+  return list.length ? list.map(u => `<div class="panel person" data-person="${u.id}">
+    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><div><b>${esc(u.display_name || '(no name)')}</b> <span class="tag">${ROLE[u.role] || esc(u.role)}</span>
+      <div class="meta">${esc(u.email)}${u.studio_name ? ' · ' + esc(u.studio_name) : ''}</div></div>
+      ${u.role === 'parent' ? `<div style="text-align:right"><b>⭐ ${u.credits}</b><div class="meta">${u.plan ? esc(u.plan) + (u.plan_status && u.plan_status !== 'active' ? ' (' + esc(u.plan_status) + ')' : '') : 'No plan'}</div></div>` : ''}</div>
+    <div class="meta" style="margin-top:4px">Joined ${fmtDate(u.created_at)}${u.last_sign_in ? ' · last seen ' + fmtDate(u.last_sign_in) : ''}${u.role === 'parent' ? ` · ${u.upcoming} upcoming · ${u.attended} attended · ${u.kids} kid${u.kids === 1 ? '' : 's'}` : ''}${u.terms_version ? '' : ' · ⚠️ no terms on record'}</div></div>`).join('')
+    : '<div class="empty">Nobody matches.</div>';
+}
+function renderAdminPeople(el) {
+  const n = r => adminUsers.filter(u => r === 'all' || u.role === r).length;
+  el.innerHTML = `<h2 style="margin:24px 0 4px">People</h2>
+    <p class="meta" style="margin:0 0 10px">Look someone up to see their bookings and credits, fix their balance or refund a class.</p>
+    <input id="peopleQ" placeholder="Search name, email or studio" value="${esc(peopleQ)}">
+    <div class="seg" style="flex-wrap:wrap">${[['all', 'All'], ['parent', 'Parents'], ['studio', 'Studios'], ['admin', 'Admins']].map(([k, l]) => `<button data-peoplerole="${k}" class="${peopleRole === k ? 'on' : ''}">${l} (${n(k)})</button>`).join('')}</div>
+    <div id="peopleList">${peopleRows()}</div>`;
+}
+async function openPerson(id) {
+  const u = adminUsers.find(x => x.id === id);
+  if (!u) return;
+  const { data: d, error } = await sb.rpc('admin_user_detail', { p_user: id });
+  if (error) return toast(error.message);
+  const up = d.bookings.filter(b => b.session_date >= todayStr), past = d.bookings.filter(b => b.session_date < todayStr);
+  const bk = b => `<div class="hist"><div><div>${esc(b.class_title)} · ${esc(b.attendee_name)}</div><div class="meta">${dateLabel(b.session_date)} ${t12(b.session_time)} · ${esc((studioById(b.studio_id) || {}).name || '')} · ⭐ ${b.credits}${b.source === 'waitlist' ? ' · from waitlist' : ''}</div></div>
+    ${b.session_date >= todayStr && !b.payout_id ? `<button class="btn ghost" data-arefund="${b.id}" data-person-id="${id}">Refund</button>` : ''}</div>`;
+  openModal(`<h2>${esc(u.display_name || '(no name)')}</h2>
+    <div class="meta">${esc(u.email)} · ${ROLE[u.role] || esc(u.role)}${u.studio_name ? ' · ' + esc(u.studio_name) : ''}<br>Joined ${fmtDate(u.created_at)}${u.plan ? ` · ${esc(u.plan)} plan (${esc(u.plan_status || '')})` : ''}</div>
+    ${u.role === 'parent' ? `<div class="panel" style="margin-top:12px"><div class="label">Credits: ⭐ ${u.credits}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="adjAmt" type="number" step="1" placeholder="+5 or -5" style="flex:0 1 110px;margin:0"><input id="adjWhy" maxlength="150" placeholder="Reason (the parent sees this)" style="flex:1 1 180px;margin:0"></div>
+      <button class="btn" style="margin-top:8px" data-adjust="${id}">Adjust credits</button></div>` : ''}
+    ${d.kids.length ? `<div class="label" style="margin-top:12px">Kids</div><div class="meta">${d.kids.map(k => `${esc(k.name)} (born ${esc(k.birthday)})`).join(' · ')}</div>` : ''}
+    ${up.length ? `<div class="label" style="margin-top:12px">Upcoming bookings</div>${up.map(bk).join('')}` : ''}
+    ${d.waitlist.length ? `<div class="label" style="margin-top:12px">Waitlists</div>${d.waitlist.map(w => `<div class="meta">${dateLabel(w.session_date)} · ${esc(w.attendee_name)}</div>`).join('')}` : ''}
+    ${past.length ? `<details style="margin-top:12px"><summary class="label" style="cursor:pointer">Past bookings (${past.length})</summary>${past.map(bk).join('')}</details>` : ''}
+    ${d.ledger.length ? `<details style="margin-top:12px"><summary class="label" style="cursor:pointer">Credit history (${d.ledger.length})</summary>${d.ledger.map(l => `<div class="hist"><div><div>${esc(l.reason)}</div><div class="meta">${fmtDate(l.created_at)}</div></div><b class="${l.delta > 0 ? 'plus' : ''}">${l.delta > 0 ? '+' : ''}${l.delta}</b></div>`).join('')}</details>` : ''}
+    <div class="actions"><button class="btn ghost" data-close>Close</button></div>`);
+}
+async function adjustCredits(id) {
+  const amt = parseInt($('#adjAmt').value, 10), why = $('#adjWhy').value.trim();
+  if (!amt) return toast('Enter how many credits, like 5 or -5');
+  if (!why) return toast('Add a reason. The parent sees it in their history.');
+  const u = adminUsers.find(x => x.id === id);
+  if (!confirm(`${amt > 0 ? 'Add' : 'Remove'} ${Math.abs(amt)} credits ${amt > 0 ? 'to' : 'from'} ${u.display_name || u.email}?`)) return;
+  const { data, error } = await sb.rpc('admin_adjust_credits', { p_user: id, p_delta: amt, p_reason: why });
+  if (error) return toast(error.message);
+  await refresh(); toast(`Done. New balance: ⭐ ${data}`); openPerson(id);
+}
+async function adminRefund(bookingId, personId) {
+  const why = prompt('Refund this booking? The parent gets their credits back and an email. Reason (shown to the parent):');
+  if (why === null) return;
+  const { error } = await sb.rpc('admin_refund_booking', { p_booking: bookingId, p_reason: why });
+  if (error) return toast(error.message);
+  await refresh(); toast('Refunded'); openPerson(personId);
+}
+// Spreadsheet download. Cells starting with = + @ are prefixed so spreadsheet apps don't run them as formulas.
+async function exportCsv(kind) {
+  const { data, error } = await sb.rpc('admin_export', { p_kind: kind });
+  if (error) return toast(error.message);
+  if (!data || !data.length) return toast('Nothing to export yet.');
+  const cols = [...new Set(data.flatMap(r => Object.keys(r)))];
+  const cell = v => {
+    if (v === null || v === undefined) return '';
+    let t = typeof v === 'object' ? JSON.stringify(v) : String(v);
+    if (/^[=+@\t\r]/.test(t) || /^-[^\d]/.test(t)) t = "'" + t;
+    return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  };
+  const csv = [cols.join(','), ...data.map(r => cols.map(c => cell(r[c])).join(','))].join('\r\n');
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv' }));
+  link.download = `littlepass-${kind}-${fmt(new Date())}.csv`;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 4000);
+}
+
 async function setStudioStatus(id, to) {
   const s = adminStudios.find(x => x.id === id);
   let note = null;
@@ -1411,6 +1534,7 @@ async function savePricing() {
   await refresh(); toast('Saved. All class prices recalculated ✓');
 }
 $('#view-admin').addEventListener('input', e => { if (e.target.closest('#prCv, #prMargin, #prMax')) pricingExamples(); });
+$('#view-admin').addEventListener('input', e => { if (e.target.id === 'peopleQ') { peopleQ = e.target.value; $('#peopleList').innerHTML = peopleRows(); } });
 
 // ----- Admin: reports -----
 function renderAdminReports(el) {
@@ -1507,6 +1631,28 @@ async function handleClick(e) {
   if ((el = hit('[data-rmclass]'))) { deleteClass(el.dataset.rmclass); return; }
   if ((el = hit('[data-goto]'))) { showTab(el.dataset.goto); return; }
   if ((el = hit('[data-bkf]'))) { bkFilter = el.dataset.bkf; renderOwner(); return; }
+  if ((el = hit('[data-peoplerole]'))) { peopleRole = el.dataset.peoplerole; renderAdmin(); return; }
+  if ((el = hit('[data-adjust]'))) { adjustCredits(el.dataset.adjust); return; }
+  if ((el = hit('[data-arefund]'))) { adminRefund(el.dataset.arefund, el.dataset.personId); return; }
+  if ((el = hit('[data-person]'))) { openPerson(el.dataset.person); return; }
+  if ((el = hit('[data-export]'))) { exportCsv(el.dataset.export); return; }
+  if (hit('[data-histall]')) { histAll = !histAll; renderProfile(); return; }
+  if ((el = hit('[data-editname]'))) { editName = el.dataset.editname === '1'; renderProfile(); return; }
+  if (hit('[data-savename]')) {
+    const name = $('#myName').value.trim();
+    if (!name) return toast('Please enter your name');
+    const { error } = await sb.from('profiles').update({ display_name: name }).eq('id', user.id);
+    if (error) return toast(error.message);
+    editName = false; await loadPrivate(); renderProfile(); toast('Name saved'); return;
+  }
+  if ((el = hit('[data-editkid]'))) { editKid = el.dataset.editkid || null; renderProfile(); return; }
+  if ((el = hit('[data-savekid]'))) {
+    const name = $('#ekName').value.trim(), bday = $('#ekBday').value;
+    if (!name || !bday) return toast('Please add a name and birthday');
+    const { error } = await sb.from('kids').update({ name, birthday: bday }).eq('id', el.dataset.savekid);
+    if (error) return toast(error.message);
+    editKid = null; await loadPrivate(); renderProfile(); renderFilters(); renderResults(); toast('Saved'); return;
+  }
   if (hit('[data-addkid]')) {
     const name = $('#kidName').value.trim(), bday = $('#kidBday').value;
     if (!name || !bday) return toast('Please add a name and birthday');
