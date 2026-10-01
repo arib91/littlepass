@@ -58,6 +58,7 @@ Deno.serve(async (req) => {
         if (!['subscription_create', 'subscription_cycle'].includes(inv.billing_reason ?? '')) break;
         const { error } = await db.rpc('grant_plan_credits', {
           p_user: synced.userId, p_plan: synced.plan.id, p_credits: synced.plan.credits, p_ref: inv.id,
+          p_first: inv.billing_reason === 'subscription_create',
         });
         if (error) throw error;
         break;
