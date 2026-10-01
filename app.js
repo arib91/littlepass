@@ -440,7 +440,7 @@ function card(s, mode) {
     <div class="emoji" style="background:${c.color}">${c.emoji}</div>
     <div>
       <h3>${esc(s.title)}</h3>
-      <div class="meta"><a class="lnk" data-studio="${esc(s.studio)}">${esc(s.studio)}</a><br>📍 ${s.hood} · 🕘 ${mode === 'booking' ? dayName(s.date) + ', ' : ''}${s.time}${s.mins ? ` (${s.mins} min)` : ''}${s.loc ? (mode === 'booking' ? `<br>🧭 ${esc(s.loc.address)}<br>${dirLinks(s.loc)}` : ` · <a class="lnk" href="${gmaps(s.loc)}" target="_blank" rel="noopener">Directions</a>`) : ''}</div>
+      <div class="meta"><a class="lnk" data-studio="${esc(s.studio)}">${esc(s.studio)}</a><br>📍 ${esc(s.hood)} · 🕘 ${mode === 'booking' ? dayName(s.date) + ', ' : ''}${s.time}${s.mins ? ` (${s.mins} min)` : ''}${s.loc ? (mode === 'booking' ? `<br>🧭 ${esc(s.loc.address)}<br>${dirLinks(s.loc)}` : ` · <a class="lnk" href="${gmaps(s.loc)}" target="_blank" rel="noopener">Directions</a>`) : ''}</div>
       <div class="tags">
         ${s.ageMax ? `<span class="tag">👶 ${ageText(s.ageMin, s.ageMax)}</span>` : ''}
         ${(() => { const rt = s.classId && classRating(s.classId); return rt ? `<span class="tag">★ ${rt.avg.toFixed(1)} (${rt.n})</span>` : ''; })()}
@@ -536,7 +536,7 @@ function openDetails(classId) {
   openModal(`
     <div class="emoji" style="background:${cat.color};margin-bottom:10px">${cat.emoji}</div>
     <h2 style="margin-bottom:2px">${esc(c.title)}</h2>
-    <div class="meta"><a class="lnk" data-studio="${esc(st ? st.name : '')}">${esc(st ? st.name : '')}</a> · 📍 ${c.hood}${rt ? ` · ★ ${rt.avg.toFixed(1)} (${rt.n})` : ''}</div>
+    <div class="meta"><a class="lnk" data-studio="${esc(st ? st.name : '')}">${esc(st ? st.name : '')}</a> · 📍 ${esc(c.hood)}${rt ? ` · ★ ${rt.avg.toFixed(1)} (${rt.n})` : ''}</div>
     <div class="tags"><span class="tag">👶 ${ageText(c.age_min, c.age_max)}</span><span class="tag">${PARENT_STAYS[c.parent_stays] || ''}</span><span class="tag">${LEVELS[c.level] || ''}</span></div>
     ${c.description ? `<p style="white-space:pre-line;margin:12px 0 6px">${esc(c.description)}</p>` : '<p class="meta" style="margin:12px 0 6px">The studio hasn\'t added a description yet.</p>'}
     ${c.focus ? `<p style="margin:6px 0"><b>Focus:</b> ${esc(c.focus)}</p>` : ''}
@@ -623,13 +623,13 @@ function renderStudio() {
       <div class="big">${c0.emoji}</div>
       <div><h1>${esc(st.name)}</h1>
         <div class="meta">${all.length ? `<span class="stars">${starStr(avg)}</span> ${avg.toFixed(1)} (${all.length} review${all.length > 1 ? 's' : ''})` : 'New on LittlePass'}</div>
-        <div class="meta">📍 ${hoods.length ? hoods.join(' & ') : 'San Diego'}</div></div>
+        <div class="meta">📍 ${hoods.length ? esc(hoods.join(' & ')) : 'San Diego'}</div></div>
     </div>
     <div class="panel"><div class="label">About</div><p style="margin:0">${esc(st.blurb || 'A LittlePass partner studio.')}</p>
       <div class="tags">${cats.map(c => `<span class="tag">${CATS[c].emoji} ${CATS[c].label}</span>`).join('')}</div></div>
     ${cs.length ? `<div class="panel"><div class="label">Where</div>${[...new Map(cs.map(c => { const l = locByClass(c.id); return [l ? 'a:' + l.address : 'h:' + c.hood + (c.has_address ? '!' : ''), { c, l }]; })).values()].map(({ c, l }) =>
       l ? `<div style="margin:4px 0">📍 ${esc(l.address)}<div class="meta">🧭 ${dirLinks(l)}</div></div>`
-        : `<div style="margin:4px 0">📍 ${c.hood}${c.has_address ? '<div class="meta">🔒 Exact address shared after you book</div>' : ''}</div>`).join('')}</div>` : ''}
+        : `<div style="margin:4px 0">📍 ${esc(c.hood)}${c.has_address ? '<div class="meta">🔒 Exact address shared after you book</div>' : ''}</div>`).join('')}</div>` : ''}
     ${cs.length ? `<div class="panel"><div class="label">Classes</div>${cs.map(c => `<div style="padding:8px 0;border-top:1px solid var(--line)"><b>${esc(c.title)}</b> <span class="meta">· ${ageText(c.age_min, c.age_max)} · ${(LEVELS[c.level] || '').replace(/^\S+\s/, '')}</span>${c.description ? `<div class="meta">${esc(c.description.length > 110 ? c.description.slice(0, 110) + '…' : c.description)}</div>` : ''}<a class="lnk" style="font-size:13px" data-details="${c.id}">Details</a></div>`).join('')}</div>` : ''}
     ${photos.length ? `<div class="label" style="margin-top:20px">Photos</div><div class="photos real">${photos.map(p => `<img class="photo" loading="lazy" alt="${esc(p.caption || st.name)}" src="${photoUrl(p)}" data-photo="${p.id}">`).join('')}</div>`
       : sample && cats.length ? `<div class="label" style="margin-top:20px">Photos</div><div class="photos">${cats.concat(cats, cats).slice(0, 3).map(c => `<div class="photo" style="background:${CATS[c].color}">${CATS[c].emoji}</div>`).join('')}</div><div class="meta" style="margin-top:4px">Placeholder images for this demo partner.</div>` : ''}
@@ -1288,7 +1288,7 @@ const adminCard = s => {
     ${s.blurb ? `<p style="margin:10px 0 0">${esc(s.blurb)}</p>` : ''}
     <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:800;color:var(--brand-dark)">${cs.length} class${cs.length === 1 ? '' : 'es'}</summary>
       ${cs.map(c => { const ss = slots.filter(x => x.class_id === c.id).sort((a, b) => a.dow - b.dow);
-        return `<div style="margin-top:10px"><b>${CATS[c.cat].emoji} ${esc(c.title)}</b> <span class="meta">· ${c.hood} · ${ageText(c.age_min, c.age_max)}${locByClass(c.id) ? ' · 📍 ' + esc(locByClass(c.id).address) : ''}</span>
+        return `<div style="margin-top:10px"><b>${CATS[c.cat].emoji} ${esc(c.title)}</b> <span class="meta">· ${esc(c.hood)} · ${ageText(c.age_min, c.age_max)}${locByClass(c.id) ? ' · 📍 ' + esc(locByClass(c.id).address) : ''}</span>
           ${ss.map(x => `<div class="meta">${DOW[x.dow]} ${t12(x.start_time)} · ${x.capacity} spots · ${money(x.price_cents)} → ⭐ ${x.credits}${x.active ? '' : ' (closed)'}</div>`).join('') || '<div class="meta">No time slots</div>'}</div>`; }).join('') || '<div class="meta" style="margin-top:8px">No classes yet.</div>'}</details></div>`;
 };
 function renderAdmin() {
@@ -1510,7 +1510,7 @@ async function handleClick(e) {
     openModal(`
       <div class="emoji" style="background:${CATS[s.cat].color};margin-bottom:12px">${CATS[s.cat].emoji}</div>
       <h2>${esc(s.title)}</h2>
-      <div class="meta">${esc(s.studio)} · ${s.hood}<br>${dayName(s.date)} at ${s.time} · ${s.mins} min<br>Ages ${ageText(s.ageMin, s.ageMax)}${s.loc ? `<br>🧭 ${esc(s.loc.address)}` : ''}</div>
+      <div class="meta">${esc(s.studio)} · ${esc(s.hood)}<br>${dayName(s.date)} at ${s.time} · ${s.mins} min<br>Ages ${ageText(s.ageMin, s.ageMax)}${s.loc ? `<br>🧭 ${esc(s.loc.address)}` : ''}</div>
       ${!s.loc && s.hasAddr ? '<p class="meta" style="margin:8px 0 0">🔒 The exact address is shared with you once you book.</p>' : ''}
       ${(() => { const cl = classById(s.classId); return cl ? `<div class="tags" style="margin:8px 0 0"><span class="tag">${PARENT_STAYS[cl.parent_stays] || ''}</span><span class="tag">${LEVELS[cl.level] || ''}</span></div>${cl.description ? `<p class="meta" style="margin:8px 0 0">${esc(cl.description.length > 160 ? cl.description.slice(0, 160) + '…' : cl.description)} <a class="lnk" data-details="${cl.id}">More</a></p>` : ''}${cl.what_to_bring ? `<p class="meta" style="margin:6px 0 0"><b>Bring:</b> ${esc(cl.what_to_bring)}</p>` : ''}` : ''; })()}
       <p><b>Cost: ⭐ ${s.credits} credits</b> · You have ${credits}</p>
