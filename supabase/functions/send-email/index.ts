@@ -13,6 +13,9 @@ const SITE = (Deno.env.get('SITE_URL') ?? '').replace(/\/$/, '');
 // While testing, every email goes to ADMIN_EMAIL instead of the real recipient
 const TEST = (Deno.env.get('EMAIL_TEST_MODE') ?? 'true') !== 'false';
 
+// Each run records what it did, so a skipped email is never silent
+const trace: string[] = [];
+
 const esc = (t: unknown) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 const day = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 const time12 = (t: string) => { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; };
@@ -29,28 +32,30 @@ function layout(title: string, inner: string, button?: { label: string; url: str
 }
 
 async function send(to: string | undefined, subject: string, html: string) {
-  if (!to) return;
+  if (!to) { trace.push(`SKIPPED "${subject}": no recipient address found`); return; }
   const realTo = TEST ? ADMIN : to;
   const subj = TEST ? `[TEST → ${to}] ${subject}` : subject;
-  if (!realTo) { console.log('No recipient (set ADMIN_EMAIL)'); return; }
+  if (!realTo) { trace.push(`SKIPPED "${subject}": ADMIN_EMAIL is empty`); return; }
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${Deno.env.get('RESEND_API_KEY')}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ from: FROM, to: [realTo], subject: subj, html }),
   });
   if (!res.ok) throw new Error(`Resend ${res.status}: ${await res.text()}`);
+  trace.push(`SENT "${subject}" (Resend accepted: ${(await res.json()).id})`);
 }
 
 const emailOf = async (userId?: string | null) => {
   if (!userId) return undefined;
-  const { data } = await db.auth.admin.getUserById(userId);
-  return data.user?.email ?? undefined;
+  const { data, error } = await db.auth.admin.getUserById(userId);
+  if (error) trace.push(`lookup failed for user ${userId}: ${error.message}`);
+  return data?.user?.email ?? undefined;
 };
 
 async function handle(event: string, data: Record<string, string>) {
   if (event === 'studio_signup') {
     const { data: s } = await db.from('studios').select('*').eq('id', data.studio_id).single();
-    if (!s) return;
+    if (!s) { trace.push('studio_signup: studio not found'); return; }
     const { data: p } = await db.from('profiles').select('display_name').eq('id', s.owner_id).maybeSingle();
     await send(ADMIN, `New studio waiting for approval: ${s.name}`, layout('A new studio signed up',
       `<p><b>${esc(s.name)}</b> is waiting for your approval.</p><p>Owner: ${esc(p?.display_name ?? '')} (${esc(await emailOf(s.owner_id) ?? '')})</p>${s.blurb ? `<p style="color:#7a7483">${esc(s.blurb)}</p>` : ''}`,
@@ -73,7 +78,7 @@ async function handle(event: string, data: Record<string, string>) {
 
   if (event === 'booking_created') {
     const { data: b } = await db.from('bookings').select('*').eq('id', data.booking_id).single();
-    if (!b) return;
+    if (!b) { trace.push('booking_created: booking not found'); return; }
     const [{ data: st }, { data: loc }, { data: pr }] = await Promise.all([
       db.from('studios').select('name, owner_id').eq('id', b.studio_id).single(),
       b.class_id ? db.from('class_locations').select('address').eq('class_id', b.class_id).maybeSingle() : Promise.resolve({ data: null }),
@@ -104,9 +109,10 @@ Deno.serve(async (req) => {
     if (!settings || req.headers.get('x-hook-secret') !== settings.hook_secret) return new Response('Unauthorized', { status: 401 });
     const { event, data } = await req.json();
     await handle(event, data ?? {});
-    return new Response('ok');
+    console.log(trace.join(' | '));
+    return new Response(JSON.stringify(trace));
   } catch (e) {
     console.error('send-email error', e);
-    return new Response('error', { status: 500 });
+    return new Response(JSON.stringify([...trace, `ERROR: ${(e as Error).message}`]), { status: 500 });
   }
 });
