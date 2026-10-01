@@ -45,6 +45,7 @@ const REVIEW_POOL = [
   ['Jordan M.', 4, 'Lovely instructors and a nice mix of ages. Parking is a little tight.'],
   ['Sam K.', 5, 'We tried it as a first activity with our newborn and felt totally comfortable.'],
 ];
+const TERMS_VERSION = 'draft-1'; // bump when the legal text changes
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // ---------- State ----------
@@ -267,6 +268,7 @@ function openAuth(mode = 'login', reason = '', role = authState.role) {
       <div class="label">Your name</div><input id="auName" placeholder="Your name" autocomplete="name">` : ''}
     <div class="label">Email</div><input id="auEmail" type="email" placeholder="you@email.com" autocomplete="email">
     <div class="label">Password</div><input id="auPass" type="password" placeholder="At least 6 characters" autocomplete="${su ? 'new-password' : 'current-password'}">
+    ${su ? `<label class="consent"><input type="checkbox" id="auTerms" style="width:auto;margin:3px 8px 0 0"><span>I'm 18 or older and I agree to the <a class="lnk" href="legal/terms.html" target="_blank" rel="noopener">Terms</a> and <a class="lnk" href="legal/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>${authState.role === 'studio' ? ' and the <a class="lnk" href="legal/studio-agreement.html" target="_blank" rel="noopener">Studio Partner Agreement</a>' : ''}.</span></label>` : ''}
     ${su ? '' : '<div style="margin:-4px 0 8px"><a class="lnk" data-forgot style="font-size:14px;font-weight:700">Forgot password?</a></div>'}
     <div class="err" id="auErr"></div>
     <div class="actions"><button class="btn ghost" data-close>Cancel</button><button class="btn" data-authgo>${su ? 'Create account' : 'Log in'}</button></div>`);
@@ -301,7 +303,8 @@ async function authGo() {
   if (authState.mode === 'signup') {
     const name = $('#auName').value.trim();
     if (!name) { err.textContent = 'Please enter your name.'; btn.disabled = false; return; }
-    res = await sb.auth.signUp({ email, password, options: { data: { name, role: authState.role } } });
+    if (!$('#auTerms').checked) { err.textContent = 'Please agree to the Terms and Privacy Policy to create an account.'; btn.disabled = false; return; }
+    res = await sb.auth.signUp({ email, password, options: { data: { name, role: authState.role, terms_version: TERMS_VERSION, terms_accepted_at: new Date().toISOString() } } });
     if (!res.error && !res.data.session) {
       openModal('<h2>Check your email 📬</h2><p>We sent a confirmation link to <b>' + esc(email) + '</b>. Click it, then come back and log in.</p><div class="actions"><button class="btn" data-close>OK</button></div>');
       return;
