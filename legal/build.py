@@ -63,7 +63,8 @@ TERMS = '''
 
 <h2>5. Safety and your responsibilities</h2>
 <p>Studios, not LittlePass, are responsible for running safe classes, supervising participants (other than your responsibility to supervise your child), their instructors' qualifications and background checks, their premises and their insurance. You're responsible for deciding whether a class is suitable for your child, for your child's health, and for supervising your child unless the studio tells you otherwise. Tell the studio about allergies, medical needs or other relevant information.</p>
-<p>[LAWYER: assumption of risk, waivers and releases for activities involving minors need careful drafting under California law. Decide whether LittlePass requires studios to collect their own waivers.]</p>
+<p><b>Studio waivers.</b> A studio may ask you to agree to its own waiver or release before you book. If it does, you'll read it in the app and sign by ticking a box and typing your name, for yourself and for each child you book. That agreement is between you and the studio. We keep a copy of what you signed, with the date and time, and share it with that studio. You can see your signed waivers in the app at any time.</p>
+<p>[LAWYER: assumption of risk, waivers and releases for activities involving minors need careful drafting under California law. Decide (a) whether LittlePass requires studios to use a waiver, (b) whether every studio waiver should also release LittlePass, and (c) whether these Terms need LittlePass's own assumption-of-risk clause.]</p>
 
 <h2>6. Reviews and community content</h2>
 <ul>
@@ -155,7 +156,7 @@ PRIVACY = '''
 <p>We send transactional emails: account, booking, subscription and safety messages. We don't send marketing email unless you opt in. [DECISION: marketing emails and unsubscribe.]</p>
 
 <h2>7. How long we keep information</h2>
-<p>We keep your account information while your account is open. When you close it we delete or anonymise your personal information, except records we must keep for legal, tax or fraud-prevention reasons (such as payment and booking records, kept for 7 years). Reviews you wrote may stay in an anonymised form. [LAWYER: confirm retention periods.]</p>
+<p>We keep your account information while your account is open. When you close it we delete or anonymise your personal information, except records we must keep for legal, tax or fraud-prevention reasons (such as payment and booking records, kept for 7 years). Reviews you wrote may stay in an anonymised form. <b>Waivers you signed</b> (your typed name, the children named and the exact text) are kept as legal records even after you close your account, and remain available to the studio. [LAWYER: confirm retention periods, including for signed waivers.]</p>
 
 <h2>8. Your rights and choices</h2>
 <p>You can see and edit your account details and your children's details in the app. Depending on where you live (including California), you may also have the right to ask us to:</p>

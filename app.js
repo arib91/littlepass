@@ -92,6 +92,7 @@ let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
 let adminStats = null, adminUsers = [], adminAudit = [], peopleQ = '', peopleRole = 'all', myLedger = [], histAll = false, editKid = null, editName = false;
 let adminPay = [], adminPayouts = [], adminPricing = null, adminReports = [];
+let waivers = [], mySignatures = [], ownWaivers = [], studioSignatures = [], waiverFlow = null, editWaiver = null;
 let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [], locations = [], exceptions = [], contacts = [];
 
 // ---------- Language ----------
@@ -186,7 +187,7 @@ $('#modalBg').onclick = e => { if (e.target.id === 'modalBg' || e.target.dataset
 
 // ---------- Data ----------
 async function loadPublic() {
-  const [st, cl, sl, rv, ct, ch, ph, pl, lc, ex, co] = await Promise.all([
+  const [st, cl, sl, rv, ct, ch, ph, pl, lc, ex, co, wv] = await Promise.all([
     sb.from('studios').select('*'),
     sb.from('classes').select('*'),
     sb.from('class_slots').select('*'),
@@ -198,8 +199,10 @@ async function loadPublic() {
     sb.from('class_locations').select('*'),
     sb.from('slot_exceptions').select('*'),
     sb.from('studio_contacts').select('*'),
+    sb.from('studio_waivers').select('*').eq('active', true).order('created_at'),
   ]);
   contacts = co.data || [];
+  waivers = wv.data || [];
   locations = lc.data || [];
   exceptions = ex.data || [];
   studioPhotos = ph.data || [];
@@ -211,7 +214,7 @@ async function loadPublic() {
   (ct.data || []).forEach(r => { counts[`${r.slot_id}_${r.session_date}`] = Number(r.taken); });
 }
 async function loadPrivate() {
-  kids = []; myBookings = []; myWaitlist = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null; adminReports = []; pastBookings = []; adminUsers = []; adminAudit = []; myLedger = []; adminStats = null;
+  kids = []; myBookings = []; myWaitlist = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null; adminReports = []; pastBookings = []; adminUsers = []; adminAudit = []; myLedger = []; adminStats = null; mySignatures = []; ownWaivers = []; studioSignatures = [];
   if (!user) { profile = null; return; }
   profile = (await sb.from('profiles').select('*').eq('id', user.id).single()).data;
   if (profile && profile.role === 'admin') {
@@ -227,20 +230,23 @@ async function loadPrivate() {
   if (profile && profile.role === 'studio') {
     const st = studios.find(s => s.owner_id === user.id);
     if (st) {
-      const [b, po] = await Promise.all([
+      const [b, po, ow, sg] = await Promise.all([
         sb.from('bookings').select('*').eq('studio_id', st.id).order('session_date', { ascending: false }).limit(1000),
         sb.from('payouts').select('*').eq('studio_id', st.id).order('created_at', { ascending: false }),
+        sb.from('studio_waivers').select('*').eq('studio_id', st.id).order('created_at'),
+        sb.from('waiver_signatures').select('*').eq('studio_id', st.id).order('signed_at', { ascending: false }),
       ]);
-      studioBookings = b.data || []; payouts = po.data || [];
+      studioBookings = b.data || []; payouts = po.data || []; ownWaivers = ow.data || []; studioSignatures = sg.data || [];
     }
   } else {
-    const [k, b, w, l] = await Promise.all([
+    const [k, b, w, l, sg] = await Promise.all([
       sb.from('kids').select('*').order('created_at'),
       sb.from('bookings').select('*').eq('user_id', user.id),
       sb.rpc('my_waitlist'),
       sb.from('credit_ledger').select('delta, reason, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(200),
+      sb.from('waiver_signatures').select('*').eq('user_id', user.id).order('signed_at', { ascending: false }),
     ]);
-    const mine = b.data || []; myWaitlist = w.data || []; myLedger = l.data || [];
+    const mine = b.data || []; myWaitlist = w.data || []; myLedger = l.data || []; mySignatures = sg.data || [];
     kids = k.data || []; myBookings = mine.filter(x => x.session_date >= todayStr); pastBookings = mine.filter(x => x.session_date < todayStr);
   }
 }
@@ -651,6 +657,7 @@ function openDetails(classId) {
     ${c.focus ? `<p style="margin:6px 0"><b>${T('Focus:')}</b> ${esc(c.focus)}</p>` : ''}
     ${c.what_to_bring ? `<p style="margin:6px 0"><b>${T('What to bring:')}</b> ${esc(c.what_to_bring)}</p>` : ''}
     ${loc ? `<p style="margin:6px 0">🧭 ${esc(loc.address)}<br>${dirLinks(loc)}</p>` : c.has_address ? `<p class="meta" style="margin:6px 0">${T('🔒 The exact address is shared once you book.')}</p>` : ''}
+    ${waiverNote(c.id)}
     <div class="label" style="margin-top:12px">${T('Next sessions')}</div>
     ${next.length ? next.map(s => `<div class="cls" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)"><div><b>${dayName(s.date)}</b><div class="meta">${s.time} · ${s.mins} min · ⭐ ${s.credits}</div></div>
       <div style="margin-left:auto">${sessBtn(s, 'style="padding:6px 12px"') || `<button class="btn" style="padding:6px 12px" data-book="${s.id}">${T('Book')}</button>`}</div></div>`).join('') : `<p class="meta">${T('No upcoming sessions.')}</p>`}
@@ -812,6 +819,59 @@ async function doReport(kind, id) {
   if (error) return toast(tx(error.message));
   closeModal(); toast(T("Thanks. We'll take a look."));
 }
+
+// ---------- Studio waivers ----------
+// A studio can ask families to agree to its own waiver(s) before booking. Parents sign in the app (tick + typed name);
+// the database keeps an exact copy of what was signed and refuses bookings until the current version is signed.
+const waiversForClass = classId => { const c = classById(classId); return c ? waivers.filter(w => w.studio_id === c.studio_id && (!w.class_ids || w.class_ids.includes(classId))) : []; };
+// Same naming rule as the database: no child picked means the parent's own name
+const attendeeNames = picks => picks.map(p => ((p || '').trim() || (profile && profile.display_name) || 'Parent').slice(0, 60));
+const unsignedWaivers = (classId, names) => waiversForClass(classId).filter(w =>
+  !mySignatures.some(sg => sg.waiver_id === w.id && sg.version === w.version && names.every(n => (sg.kids || []).includes(n))));
+const WAIVER_MSG = 'Please read and sign the studio waiver before booking';
+function openWaiverFlow(list, names, then) {
+  waiverFlow = { list, i: 0, names, then };
+  showWaiverStep();
+}
+function showWaiverStep() {
+  const f = waiverFlow, w = f.list[f.i], st = studioById(w.studio_id), sname = esc(st ? st.name : T('The studio'));
+  openModal(`<h2>${T('📝 Waiver from {studio}', { studio: sname })}</h2>
+    <div class="meta">${esc(w.title)}${f.list.length > 1 ? ' · ' + T('{i} of {n}', { i: f.i + 1, n: f.list.length }) : ''}</div>
+    <div class="waiverbox">${esc(w.body)}</div>
+    <p class="meta" style="margin:8px 0">${T('LittlePass is a booking platform. {studio} runs this class and asks every family to agree to this waiver. Your agreement is with {studio}.', { studio: sname })}</p>
+    <label class="consent"><input type="checkbox" id="wvAgree"><span>${T('I have read this waiver and agree to it for myself and for: {names}.', { names: '<b>' + esc(f.names.join(', ')) + '</b>' })}</span></label>
+    <div class="label">${T('Type your full name to sign')}</div><input id="wvName" maxlength="100" autocomplete="name" placeholder="${T('Your full name')}">
+    <div class="err" id="wvErr"></div>
+    <div class="actions"><button class="btn ghost" data-close>${T('Cancel')}</button><button class="btn" data-signwaiver>${T('Sign and continue')}</button></div>`);
+}
+async function signWaiverStep(btn) {
+  const f = waiverFlow, w = f.list[f.i], err = $('#wvErr'), name = $('#wvName').value.trim();
+  if (!$('#wvAgree').checked) { err.textContent = T('Please tick the box to agree.'); return; }
+  if (name.length < 3) { err.textContent = T('Please type your full name to sign'); return; }
+  btn.disabled = true;
+  const { data, error } = await sb.rpc('sign_waiver', { p_waiver: w.id, p_version: w.version, p_signer: name, p_kids: f.names, p_user_agent: navigator.userAgent.slice(0, 300) });
+  if (error) {
+    btn.disabled = false; err.textContent = tx(error.message);
+    if (/updated this waiver|no longer in use/.test(error.message)) { await loadPublic(); closeModal(); toast(tx(error.message)); }
+    return;
+  }
+  mySignatures.unshift({ id: data, waiver_id: w.id, studio_id: w.studio_id, version: w.version, title: w.title, body: w.body, signer_name: name, kids: f.names, signed_at: new Date().toISOString() });
+  if (++f.i < f.list.length) return showWaiverStep();
+  waiverFlow = null; closeModal(); toast(T('Waiver signed ✓')); f.then();
+}
+function viewWaiver(text, title, studioId, signed) {
+  const st = studioById(studioId);
+  openModal(`<h2>${esc(title)}</h2><div class="meta">${esc(st ? st.name : '')}${signed ? ' · ' + T('Signed by {name} on {date} for {kids}', { name: esc(signed.signer_name), date: fmtDate(signed.signed_at), kids: esc((signed.kids || []).join(', ')) }) : ''}</div>
+    <div class="waiverbox">${esc(text)}</div><div class="actions"><button class="btn ghost" data-close>${T('Close')}</button></div>`);
+}
+function signedWaiversPanel() {
+  if (!mySignatures.length) return '';
+  return `<div class="panel"><div class="label">${T('Signed waivers')}</div>
+    ${mySignatures.map(sg => { const st = studioById(sg.studio_id); return `<div class="hist"><div><div>${esc(sg.title)} · ${esc(st ? st.name : '')}</div><div class="meta">${fmtDate(sg.signed_at)} · ${esc((sg.kids || []).join(', '))}</div></div>
+      <a class="lnk" data-viewsig="${sg.id}">${T('View')}</a></div>`; }).join('')}</div>`;
+}
+const waiverNote = classId => waiversForClass(classId).length
+  ? `<p class="meta" style="margin:8px 0 0">${T('📝 This studio asks families to sign a waiver before booking.')} ${waiversForClass(classId).map(w => `<a class="lnk" data-viewwaiver="${w.id}">${T('Read it')}</a>`).join(' · ')}</p>` : '';
 
 // ---------- Views ----------
 function pastCard(b) {
@@ -1010,7 +1070,8 @@ function renderProfile() {
       return `<div class="kid"><span style="font-size:24px">👶</span><div><b>${esc(k.name)}</b><div class="meta">${m < 24 ? T('{n} months old', { n: m }) : T('{n} years old', { n: Math.floor(m / 12) })}</div></div>
         <span style="margin-left:auto;display:flex;gap:6px"><button class="btn ghost" data-editkid="${k.id}">${T('Edit')}</button><button class="btn ghost" data-rmkid="${k.id}">${T('Remove')}</button></span></div>`;
     }).join('') : `<p class="meta">${T("Add your child and we'll show classes for their exact age.")}</p>`}</div>
-    ${creditHistoryPanel()}`}
+    ${creditHistoryPanel()}
+    ${signedWaiversPanel()}`}
     ${yourDataPanel()}`;
 }
 
@@ -1294,7 +1355,7 @@ function ownerBookingsView(el, st) {
       return `<div class="panel" style="margin-top:10px"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
         <div><b>${esc(b0.class_title)}</b><div class="meta">${dateLabel(b0.session_date)} · ${t12(b0.session_time)}</div>${bkFilter === 'upcoming' && b0.slot_id ? `<a class="lnk" style="font-size:13px" data-cancelsession="${b0.slot_id}|${b0.session_date}" data-n="${g.length}">Cancel this session</a>` : ''}</div>
         <div style="text-align:right;min-width:90px"><b>${g.length}${sl ? '/' + sl.capacity : ''}</b> booked${sl ? bar(g.length, sl.capacity) : ''}</div></div>
-        ${g.map(b => `<div class="kid"><span style="font-size:22px">👶</span><div><b>${esc(b.attendee_name)}</b><div class="meta">Parent: ${esc(b.parent_name)}</div></div><div style="margin-left:auto" class="cost">${money(b.price_cents)}</div></div>`).join('')}</div>`;
+        ${g.map(b => `<div class="kid"><span style="font-size:22px">👶</span><div><b>${esc(b.attendee_name)}</b><div class="meta">Parent: ${esc(b.parent_name)}${waiverBadge(b)}</div></div><div style="margin-left:auto" class="cost">${money(b.price_cents)}</div></div>`).join('')}</div>`;
     }).join('') : `<div class="empty">${bkFilter === 'upcoming' ? 'No upcoming bookings yet.' : 'No past bookings yet.'}</div>`}`;
 }
 
@@ -1397,9 +1458,68 @@ function ownerAccount(el, st) {
       <div><div class="label">Website</div><input id="ctWeb" maxlength="200" value="${esc(ct.website || '')}" placeholder="yourstudio.com"></div></div>
       <div class="label">Arrival notes</div><textarea id="ctNotes" rows="2" maxlength="300" placeholder="e.g. Ring the bell at the side door. Parking is behind the building.">${esc(ct.arrival_notes || '')}</textarea>`; })()}
       <button class="btn" data-savecontact>Save contact info</button></div>
+    ${waiversPanel(st)}
     <div class="panel"><div class="label">Login</div><div class="meta" style="margin-bottom:12px">${esc(user.email)}</div><button class="btn ghost" data-logout>Log out</button></div>
     ${yourDataPanel()}`;
 }
+// ----- Waivers -----
+function waiverForm(st, w) {
+  const cs = classes.filter(c => c.studio_id === st.id), some = w && w.class_ids && w.class_ids.length;
+  return `<div style="border-top:1px solid var(--line);padding-top:10px;margin-top:10px">
+    <div class="label">Title</div><input id="wvTitle" maxlength="120" value="${esc(w ? w.title : '')}" placeholder="e.g. Release of liability and assumption of risk">
+    <div class="label">Waiver text</div><textarea id="wvBody" rows="10" maxlength="20000" placeholder="Paste your full waiver here, exactly as your lawyer or insurer wrote it.">${esc(w ? w.body : '')}</textarea>
+    <div class="label">Applies to</div>
+    <label class="chk"><input type="radio" name="wvScope" value="all" ${some ? '' : 'checked'}> All my classes</label>
+    <label class="chk"><input type="radio" name="wvScope" value="some" ${some ? 'checked' : ''}> Only these classes:</label>
+    <div style="padding-left:30px">${cs.map(c => `<label class="chk"><input type="checkbox" data-wvcls value="${c.id}" ${some && w.class_ids.includes(c.id) ? 'checked' : ''}> ${esc(c.title)}</label>`).join('') || '<div class="meta">Add classes first.</div>'}</div>
+    ${w ? '<p class="meta">Changing the title or text creates a new version. Families sign it again at their next booking.</p>' : ''}
+    <button class="btn" data-wvsave>${w ? 'Save changes' : 'Add waiver'}</button> <button class="btn ghost" data-wvcancel>Cancel</button></div>`;
+}
+function waiversPanel(st) {
+  const signed = id => studioSignatures.filter(g => g.waiver_id === id).length;
+  const scope = w => !w.class_ids || !w.class_ids.length ? 'All classes' : w.class_ids.map(id => (classes.find(c => c.id === id) || {}).title).filter(Boolean).map(esc).join(', ');
+  return `<div class="panel"><div class="label">Waivers</div>
+    <p class="meta" style="margin:0 0 10px">Ask families to agree to your waiver before they book. They read it and sign in the app (tick a box and type their name), and you can see who signed for each booking.
+      Have your lawyer or insurer write or review the wording. LittlePass shows and records the waiver; it doesn't give legal advice.</p>
+    ${ownWaivers.map(w => editWaiver === w.id ? waiverForm(st, w) : `<div class="hist"><div><div><b>${esc(w.title)}</b> ${w.active ? '<span class="tag paid">Active</span>' : '<span class="tag">Off</span>'}</div>
+      <div class="meta">Version ${w.version} · ${scope(w)} · ${signed(w.id)} signature${signed(w.id) === 1 ? '' : 's'}</div></div>
+      <span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><button class="btn ghost" data-wvedit="${w.id}">Edit</button><button class="btn ghost" data-wvtoggle="${w.id}">${w.active ? 'Turn off' : 'Turn on'}</button></span></div>`).join('')}
+    ${editWaiver === 'new' ? waiverForm(st, null) : `<button class="btn ${ownWaivers.length ? 'ghost' : ''}" style="margin-top:10px" data-wvnew>+ Add a waiver</button>`}
+    ${studioSignatures.length ? ` <button class="btn ghost" style="margin-top:10px" data-wvcsv>⬇ Download signatures (CSV)</button>` : ''}</div>`;
+}
+async function saveWaiver() {
+  const st = myStudio(), title = $('#wvTitle').value.trim(), body = $('#wvBody').value.trim();
+  const some = (document.querySelector('input[name=wvScope]:checked') || {}).value === 'some';
+  const ids = [...document.querySelectorAll('[data-wvcls]:checked')].map(i => i.value);
+  if (title.length < 3) return toast('Please give the waiver a title');
+  if (body.length < 50) return toast('Please paste the full waiver text (at least 50 characters)');
+  if (some && !ids.length) return toast('Pick at least one class, or choose All my classes');
+  const row = { title, body, class_ids: some ? ids : null };
+  const cur = editWaiver !== 'new' && ownWaivers.find(w => w.id === editWaiver);
+  if (cur && (cur.title !== title || cur.body !== body) && !confirm('This creates a new version. Families will sign it again at their next booking. Continue?')) return;
+  const { error } = cur ? await sb.from('studio_waivers').update(row).eq('id', cur.id) : await sb.from('studio_waivers').insert({ ...row, studio_id: st.id });
+  if (error) return toast(error.message);
+  editWaiver = null; await refresh(); toast(cur ? 'Waiver updated' : 'Waiver added. Families will sign it before booking.');
+}
+async function toggleWaiver(id) {
+  const w = ownWaivers.find(x => x.id === id); if (!w) return;
+  if (w.active && !confirm('Turn off this waiver? Families won\'t be asked to sign it anymore. Signatures you already have are kept.')) return;
+  const { error } = await sb.from('studio_waivers').update({ active: !w.active }).eq('id', id);
+  if (error) return toast(error.message);
+  await refresh(); toast(w.active ? 'Waiver turned off' : 'Waiver turned on');
+}
+function downloadSignatures() {
+  downloadCsv(studioSignatures.map(g => ({ signed_at: g.signed_at, signed_by: g.signer_name, children: (g.kids || []).join('; '), waiver: g.title, version: g.version, waiver_text: g.body })),
+    `waiver-signatures-${fmt(new Date())}.csv`);
+}
+// For each booking: did this family sign every waiver that applies to the class?
+function waiverBadge(b) {
+  const ws = ownWaivers.filter(w => w.active && (!w.class_ids || w.class_ids.includes(b.class_id)));
+  if (!ws.length) return '';
+  const ok = ws.every(w => studioSignatures.some(g => g.waiver_id === w.id && g.user_id === b.user_id && (g.kids || []).includes(b.attendee_name)));
+  return ok ? ' <span class="tag paid">✓ Waiver signed</span>' : ' <span class="tag low">No waiver on file</span>';
+}
+
 async function saveContact() {
   const st = myStudio();
   const web = $('#ctWeb').value.trim();
@@ -1599,6 +1719,9 @@ async function exportCsv(kind) {
   const { data, error } = await sb.rpc('admin_export', { p_kind: kind });
   if (error) return toast(error.message);
   if (!data || !data.length) return toast('Nothing to export yet.');
+  downloadCsv(data, `littlepass-${kind}-${fmt(new Date())}.csv`);
+}
+function downloadCsv(data, filename) {
   const cols = [...new Set(data.flatMap(r => Object.keys(r)))];
   const cell = v => {
     if (v === null || v === undefined) return '';
@@ -1609,7 +1732,7 @@ async function exportCsv(kind) {
   const csv = [cols.join(','), ...data.map(r => cols.map(c => cell(r[c])).join(','))].join('\r\n');
   const link = document.createElement('a');
   link.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv' }));
-  link.download = `littlepass-${kind}-${fmt(new Date())}.csv`;
+  link.download = filename;
   document.body.appendChild(link); link.click(); link.remove();
   setTimeout(() => URL.revokeObjectURL(link.href), 4000);
 }
@@ -1845,6 +1968,7 @@ async function handleClick(e) {
       <div class="meta">${esc(s.studio)} · ${esc(s.hood)}<br>${T('{day} at {time}', { day: dayName(s.date), time: s.time })} · ${s.mins} min<br>${T('Ages {ages}', { ages: ageText(s.ageMin, s.ageMax) })}${s.loc ? `<br>🧭 ${esc(s.loc.address)}` : ''}</div>
       ${!s.loc && s.hasAddr ? `<p class="meta" style="margin:8px 0 0">${T('🔒 The exact address is shared with you once you book.')}</p>` : ''}
       ${(() => { const cl = classById(s.classId); return cl ? `<div class="tags" style="margin:8px 0 0"><span class="tag">${T(PARENT_STAYS[cl.parent_stays] || '')}</span><span class="tag">${T(LEVELS[cl.level] || '')}</span></div>${cl.description ? `<p class="meta" style="margin:8px 0 0">${esc(cl.description.length > 160 ? cl.description.slice(0, 160) + '…' : cl.description)} <a class="lnk" data-details="${cl.id}">${T('More')}</a></p>` : ''}${cl.what_to_bring ? `<p class="meta" style="margin:6px 0 0"><b>${T('Bring:')}</b> ${esc(cl.what_to_bring)}</p>` : ''}` : ''; })()}
+      ${waiverNote(s.classId)}
       ${whoPicker(s)}
       <p id="bkCost"></p>
       <p class="meta" style="margin:0 0 4px">${late ? T("⚠️ This class starts within {h} hours, so this booking <b>can't be cancelled</b> or refunded.", { h: cancelHours }) : T('Free cancellation up to {h} hours before the class starts.', { h: cancelHours })}</p>
@@ -1863,18 +1987,18 @@ async function handleClick(e) {
       <div class="meta">${esc(s.title)} · ${esc(s.studio)}<br>${T('{day} at {time}', { day: dayName(s.date), time: s.time })}</div>
       <p>${T("This class is full. If a spot opens up, <b>we'll book it for you automatically</b> and email you. It uses ⭐ {n} credits then, and you can still cancel for free up to {h} hours before.", { n: s.credits, h: cancelHours })}</p>
       <p class="meta">${T('Make sure you have enough credits when a spot opens, or it goes to the next family in line.')}</p>
+      ${waiverNote(s.classId)}
       <div class="label">${T("Who's coming?")}</div>
       <select id="wlWho">${kids.map(k => `<option value="${esc(k.name)}">${esc(k.name)}</option>`).join('')}<option value="">${kids.length ? T('Someone else') : T('My little one')}</option></select>
       <div class="actions"><button class="btn ghost" data-close>${T('Not now')}</button><button class="btn" data-confirmwait="${s.id}">${T('Join waitlist')}</button></div>`);
     return;
   }
   if ((el = hit('[data-confirmwait]'))) {
-    const s = SESSIONS.find(x => x.id === el.dataset.confirmwait);
+    const s = SESSIONS.find(x => x.id === el.dataset.confirmwait), attendee = ($('#wlWho') || {}).value || null;
+    const need = unsignedWaivers(s.classId, attendeeNames([attendee]));
+    if (need.length) { openWaiverFlow(need, attendeeNames([attendee]), () => joinWaitlistNow(s, attendee)); return; }
     el.disabled = true;
-    const { data, error } = await sb.rpc('join_waitlist', { p_slot: s.key, p_date: s.dateStr, p_attendee: ($('#wlWho') || {}).value || null });
-    closeModal(); await refresh();
-    if (error) return toast(tx(error.message));
-    toast(T("⏳ You're #{n} on the waitlist. We'll email you if you get in.", { n: data })); return;
+    await joinWaitlistNow(s, attendee); return;
   }
   if ((el = hit('[data-leavewait]'))) {
     if (!confirm(T("Leave this waitlist? You'll lose your place in line."))) return;
@@ -1885,12 +2009,20 @@ async function handleClick(e) {
   if ((el = hit('[data-confirm]'))) {
     const s = SESSIONS.find(x => x.id === el.dataset.confirm), who = pickedKids();
     if (!who.length) return toast(T('Pick who is coming.'));
+    const need = unsignedWaivers(s.classId, attendeeNames(who));
+    if (need.length) { openWaiverFlow(need, attendeeNames(who), () => bookNow(s, who)); return; }
     el.disabled = true;
-    const { error } = await sb.rpc('book_class_multi', { p_slot: s.key, p_date: s.dateStr, p_attendees: who });
-    closeModal();
-    if (error) { toast(tx(error.message)); await refresh(); return; }
-    await refresh(); toast((who.length > 1 ? T('🎉 Booked {title} for {n} kids!', { title: s.title, n: who.length }) : T('🎉 Booked {title}!', { title: s.title })) + (s.hasAddr && !s.loc ? ' ' + T('The address is in My classes.') : '')); return;
+    await bookNow(s, who); return;
   }
+  if ((el = hit('[data-signwaiver]'))) { signWaiverStep(el); return; }
+  if (hit('[data-wvnew]')) { editWaiver = 'new'; renderOwner(); return; }
+  if ((el = hit('[data-wvedit]'))) { editWaiver = el.dataset.wvedit; renderOwner(); return; }
+  if (hit('[data-wvcancel]')) { editWaiver = null; renderOwner(); return; }
+  if (hit('[data-wvsave]')) { saveWaiver(); return; }
+  if ((el = hit('[data-wvtoggle]'))) { toggleWaiver(el.dataset.wvtoggle); return; }
+  if (hit('[data-wvcsv]')) { downloadSignatures(); return; }
+  if ((el = hit('[data-viewwaiver]'))) { const w = waivers.find(x => x.id === el.dataset.viewwaiver); if (w) viewWaiver(w.body, w.title, w.studio_id); return; }
+  if ((el = hit('[data-viewsig]'))) { const g = mySignatures.find(x => x.id === el.dataset.viewsig) || studioSignatures.find(x => x.id === el.dataset.viewsig); if (g) viewWaiver(g.body, g.title, g.studio_id, g); return; }
   if ((el = hit('[data-cancel]'))) {
     const b = myBookings.find(x => x.id === el.dataset.cancel), s = sessionFromBooking(b);
     if (!b) return;
@@ -1903,6 +2035,26 @@ async function handleClick(e) {
   if (hit('[data-manage]')) { openPortal(); return; }
 }
 document.body.addEventListener('click', handleClick);
+
+async function bookNow(s, who) {
+  const { error } = await sb.rpc('book_class_multi', { p_slot: s.key, p_date: s.dateStr, p_attendees: who });
+  closeModal();
+  if (error) {
+    // the studio may have just added or updated a waiver: get the latest and ask to sign
+    if (error.message === WAIVER_MSG) { await loadPublic(); const need = unsignedWaivers(s.classId, attendeeNames(who)); if (need.length) return openWaiverFlow(need, attendeeNames(who), () => bookNow(s, who)); }
+    toast(tx(error.message)); await refresh(); return;
+  }
+  await refresh(); toast((who.length > 1 ? T('🎉 Booked {title} for {n} kids!', { title: s.title, n: who.length }) : T('🎉 Booked {title}!', { title: s.title })) + (s.hasAddr && !s.loc ? ' ' + T('The address is in My classes.') : ''));
+}
+async function joinWaitlistNow(s, attendee) {
+  const { data, error } = await sb.rpc('join_waitlist', { p_slot: s.key, p_date: s.dateStr, p_attendee: attendee });
+  closeModal();
+  if (error) {
+    if (error.message === WAIVER_MSG) { await loadPublic(); const need = unsignedWaivers(s.classId, attendeeNames([attendee])); if (need.length) return openWaiverFlow(need, attendeeNames([attendee]), () => joinWaitlistNow(s, attendee)); }
+    await refresh(); return toast(tx(error.message));
+  }
+  await refresh(); toast(T("⏳ You're #{n} on the waitlist. We'll email you if you get in.", { n: data }));
+}
 
 // ---------- Booking several kids at once ----------
 // Checkboxes for each child not already booked in this session ('' = the parent's name, for families with no kids saved)
