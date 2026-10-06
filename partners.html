@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Partner with LittlePass | For studios</title>
+<meta name="description" content="Fill your empty spots with San Diego families. You set your price per child and receive all of it for every completed booking, paid monthly. No fees.">
+<meta name="robots" content="noindex">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="LittlePass">
+<meta property="og:title" content="Partner with LittlePass: fill your empty spots with San Diego families">
+<meta property="og:description" content="You set your price per child and receive all of it for every completed booking, paid monthly. No fees.">
+<meta property="og:url" content="https://littlepass.netlify.app/partners">
+<meta property="og:image" content="https://littlepass.netlify.app/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  /* One-page summary for studios: shared by link after a call, and prints to a single PDF */
+  :root { --brand: #ff7a59; --ink: #2d2a32; --muted: #7a7483; --line: #efe7df; --bg: #fffaf5; --green: #2e9e5b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Nunito', system-ui, sans-serif; color: var(--ink); background: var(--bg); line-height: 1.5; }
+  a { color: inherit; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 16px 48px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; }
+  .logo { font-weight: 800; font-size: 20px; text-decoration: none; white-space: nowrap; }
+  .logo span { color: var(--brand); }
+  .pill { display: inline-block; background: #ffe3d8; color: #b4482c; font-weight: 800; font-size: 13px; padding: 5px 12px; border-radius: 999px; }
+  .hero { background: linear-gradient(135deg, #ffe9df, #e6f6f7); border-radius: 24px; padding: 28px 24px; margin: 6px 0 20px; }
+  h1 { font-size: 32px; line-height: 1.12; margin: 12px 0 8px; }
+  h2 { font-size: 21px; margin: 30px 0 10px; }
+  .lead { font-size: 17px; margin: 0; max-width: 640px; }
+  .btn { display: inline-block; background: var(--brand); color: #fff; font-weight: 800; text-decoration: none; padding: 12px 20px; border-radius: 14px; }
+  .btn.ghost { background: #fff; color: var(--ink); border: 1.5px solid var(--line); }
+  .ctas { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px; }
+  .card b.n { display: inline-flex; width: 28px; height: 28px; border-radius: 50%; background: var(--brand); color: #fff; align-items: center; justify-content: center; margin-right: 6px; }
+  .card h3 { margin: 0 0 4px; font-size: 16px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; font-size: 15px; }
+  td, th { text-align: left; padding: 10px 14px; border-top: 1px solid var(--line); }
+  th { background: #f9f3ec; border-top: 0; font-size: 13px; color: var(--muted); }
+  td.yes { color: var(--green); font-weight: 800; } td.no { color: var(--muted); font-weight: 700; }
+  ul.check { list-style: none; padding: 0; margin: 0; }
+  ul.check li { padding: 6px 0 6px 28px; position: relative; }
+  ul.check li::before { content: '\2713'; position: absolute; left: 4px; color: var(--green); font-weight: 800; }
+  details { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px; margin: 8px 0; }
+  summary { font-weight: 800; cursor: pointer; }
+  details p { margin: 8px 0 0; color: var(--muted); }
+  .final { background: #fff; border: 2px solid var(--brand); border-radius: 20px; padding: 22px; margin-top: 30px; text-align: center; }
+  .final p { margin: 6px 0 0; color: var(--muted); }
+  footer { margin-top: 28px; font-size: 13px; color: var(--muted); text-align: center; }
+  @media (max-width: 560px) { h1 { font-size: 27px; } .hero { padding: 22px 18px; } }
+  /* Printing: one clean page for a PDF or paper handout */
+  @media print {
+    @page { margin: 12mm; }
+    body { background: #fff; font-size: 12px; }
+    .wrap { padding: 0; }
+    .hero { padding: 14px 16px; margin-bottom: 10px; }
+    h1 { font-size: 22px; } h2 { font-size: 15px; margin: 12px 0 6px; }
+    .card { padding: 9px 11px; } .card p { font-size: 11px; }
+    .ctas .ghost, .faq, footer .links { display: none; }
+    details { display: none; }
+    .final { padding: 10px; margin-top: 12px; }
+    .btn { padding: 6px 10px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="logo" href="/">🐣 Little<span>Pass</span></a>
+    <span class="pill">For studios</span>
+  </header>
+
+  <section class="hero">
+    <span class="pill">Now signing founding studios in Carmel Valley, Del Mar &amp; La Jolla</span>
+    <h1>Fill your empty spots with San Diego families</h1>
+    <p class="lead">LittlePass is a monthly membership for baby and toddler classes. Families book your classes with credits, and you're paid the full price you set, every month. No sign-up fee, no monthly fee, no commission.</p>
+    <div class="ctas">
+      <a class="btn" href="/#join-studio">Become a founding studio</a>
+      <a class="btn ghost" href="/">See what families see</a>
+    </div>
+  </section>
+
+  <h2>How it works</h2>
+  <div class="steps">
+    <div class="card"><h3><b class="n">1</b>Add your classes</h3><p>Ages, days and times, how many spots you want to offer, and your price per child.</p></div>
+    <div class="card"><h3><b class="n">2</b>Families book</h3><p>They find you by their child's age, neighborhood and day, book with credits, and get a reminder the evening before.</p></div>
+    <div class="card"><h3><b class="n">3</b>You get paid monthly</h3><p>Your full price for every completed booking, at the end of each month.</p></div>
+  </div>
+
+  <h2>What you get</h2>
+  <div class="grid2">
+    <div class="card"><h3>💵 100% of your price</h3><p>You set what you receive per child. LittlePass keeps the difference between what families pay and your price, never a cut of it.</p></div>
+    <div class="card"><h3>🎛️ You control your spots</h3><p>Offer only the seats you'd otherwise leave empty. Change spots and times any time.</p></div>
+    <div class="card"><h3>✅ Paid for no-shows</h3><p>Families can cancel free up to 24 hours before. After that the booking stands, and you're paid.</p></div>
+    <div class="card"><h3>🗂️ Less admin</h3><p>Bookings, reminders, waitlists, refunds and cancellations are handled in the app. You get an email for each booking.</p></div>
+    <div class="card"><h3>📝 Your waiver, signed first</h3><p>Families read and sign your waiver in the app before they can book, and you see who signed.</p></div>
+    <div class="card"><h3>⭐ Your own studio page</h3><p>Photos, class details and reviews from families who actually attended. Your phone and arrival notes go only to booked families.</p></div>
+  </div>
+
+  <h2>When you're paid</h2>
+  <table>
+    <tr><th>Booking outcome</th><th>You're paid?</th></tr>
+    <tr><td>Child attends</td><td class="yes">Yes, your full price</td></tr>
+    <tr><td>No-show, or a cancellation within 24 hours</td><td class="yes">Yes, your full price</td></tr>
+    <tr><td>Family cancels more than 24 hours before</td><td class="no">No (the spot reopens)</td></tr>
+    <tr><td>You cancel the session</td><td class="no">No (families are refunded)</td></tr>
+  </table>
+
+  <h2>What we ask of studios</h2>
+  <ul class="check">
+    <li>Sign the Studio Partner Agreement</li>
+    <li>Carry general liability insurance and share proof</li>
+    <li>Send a W-9 so we can pay you</li>
+    <li>Keep class details and spots up to date, and honour every booking</li>
+  </ul>
+
+  <div class="faq">
+    <h2>Questions studios ask</h2>
+    <details><summary>Will this undercut my own memberships?</summary><p>Offer drop-in or trial spots only. Families often try a class through LittlePass and then sign up with you directly.</p></details>
+    <details><summary>Can I keep my booking software?</summary><p>Yes. Hold back the spots you give LittlePass; your dashboard shows who's coming.</p></details>
+    <details><summary>What does it cost me?</summary><p>Nothing. No sign-up fee, no monthly fee, no commission on your price.</p></details>
+    <details><summary>How do payouts work?</summary><p>Once a month, for every completed booking. We're moving to automatic payouts straight to your bank account.</p></details>
+    <details><summary>Can I stop any time?</summary><p>Yes. You'd just honour the bookings already made.</p></details>
+  </div>
+
+  <div class="final">
+    <h2 style="margin:0">Become a founding studio</h2>
+    <p>Founding studios are featured when LittlePass launches.</p>
+    <div class="ctas" style="justify-content:center"><a class="btn" href="/#join-studio">Sign up as a studio</a></div>
+    <p id="contact">Questions? Email Ari at <a href="mailto:bronsolerari@gmail.com"><b>bronsolerari@gmail.com</b></a></p>
+  </div>
+
+  <footer>LittlePass San Diego<span class="links"> · <a href="/legal/terms.html">Terms</a> · <a href="/legal/privacy.html">Privacy</a> · <a href="/legal/studio-agreement.html">Studio Partner Agreement (draft)</a></span></footer>
+</div>
+</body>
+</html>

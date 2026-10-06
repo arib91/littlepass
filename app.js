@@ -680,7 +680,7 @@ const ADMIN_TABS = ['stats', 'studios', 'people', 'payouts', 'pricing', 'reports
 let pendingRoute = null;
 function routeFromHash() {
   const h = decodeURIComponent(location.hash.slice(1));
-  const simple = { explore: 'explore', bookings: 'bookings', plans: 'plans', family: 'profile' };
+  const simple = { explore: 'explore', bookings: 'bookings', plans: 'plans', family: 'profile', 'join-studio': 'join-studio' };
   if (simple[h]) return simple[h];
   let m = h.match(/^owner\/(\w+)$/); if (m && OWNER_TABS.includes(m[1])) return 'o-' + m[1];
   m = h.match(/^admin\/(\w+)$/); if (m && ADMIN_TABS.includes(m[1])) return 'a-' + m[1];
@@ -689,6 +689,14 @@ function routeFromHash() {
 // Show the screen if this account can see it; studio and admin screens wait until the right person logs in
 function applyRoute() {
   const r = pendingRoute; if (!r) return false;
+  // Link for studios (from the /partners page): open the studio sign-up
+  if (r === 'join-studio') {
+    pendingRoute = null;
+    history.replaceState(null, '', location.pathname + location.search);
+    if (isStudioUser()) showTab('o-overview');
+    else if (!user) { showTab('owner'); openAuth('signup', '', 'studio'); }
+    return true;
+  }
   const needs = r.startsWith('o-') ? 'studio' : r.startsWith('a-') ? 'admin' : null;
   if (needs && !(needs === 'studio' ? isStudioUser() : isAdmin())) {
     if (!user) openAuth('login', T('Log in to continue.'));
