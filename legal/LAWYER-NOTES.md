@@ -13,6 +13,7 @@ Anything in [BRACKETS] is a placeholder or an open decision. Nothing here has be
 - **Children's data** we hold: first name + birthday, entered by the parent. Studios see the attending child's first name and parent's name for their bookings.
 - **Processors**: Supabase (DB/auth/storage), Stripe, Resend (email), Netlify (hosting), OpenFreeMap + OpenStreetMap/Nominatim (map tiles, geocoding, ZIP lookup), Google Fonts, cdnjs/jsDelivr.
 - **Referral tracking (new):** a referral link (`?ref=code`) stores the code in the browser (localStorage, 30 days) and, if the person signs up, on their profile (`referrer_code`, `signup_source`). Only the admin can see it. Used to pay partners (see question 12). Privacy Policy updated to say so.
+- **Partner dashboard (new):** a partner whose login is linked to a code sees, on their own Family tab, counts of families they brought in and each sourced studio's completed bookings per month (no names, emails or studio contact details), plus a log of what we have paid them. Please cover confidentiality of that studio data in the partner agreement.
 
 ## Questions for the lawyer
 1. **Entity and name**: LLC formation; trademark search/clearance for "LittlePass" (similar marks: Little Passports; competitor KidPass).

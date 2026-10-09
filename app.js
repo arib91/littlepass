@@ -90,7 +90,7 @@ let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentS
 let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
-let adminGrowth = null, adminStats = null, adminUsers = [], adminAudit = [], peopleQ = '', peopleRole = 'all', myLedger = [], histAll = false, editKid = null, editName = false;
+let myPartner = null, adminGrowth = null, adminStats = null, adminUsers = [], adminAudit = [], peopleQ = '', peopleRole = 'all', myLedger = [], histAll = false, editKid = null, editName = false;
 let adminPay = [], adminPayouts = [], adminPricing = null, adminReports = [];
 let waivers = [], mySignatures = [], ownWaivers = [], studioSignatures = [], waiverFlow = null, editWaiver = null;
 let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [], locations = [], exceptions = [], contacts = [];
@@ -224,7 +224,7 @@ async function loadPublic() {
   (ct.data || []).forEach(r => { counts[`${r.slot_id}_${r.session_date}`] = Number(r.taken); });
 }
 async function loadPrivate() {
-  kids = []; myBookings = []; myWaitlist = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null; adminReports = []; pastBookings = []; adminUsers = []; adminAudit = []; myLedger = []; adminStats = null; adminGrowth = null; mySignatures = []; ownWaivers = []; studioSignatures = [];
+  kids = []; myBookings = []; myWaitlist = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null; adminReports = []; pastBookings = []; adminUsers = []; adminAudit = []; myLedger = []; adminStats = null; adminGrowth = null; myPartner = null; mySignatures = []; ownWaivers = []; studioSignatures = [];
   if (!user) { profile = null; return; }
   profile = (await sb.from('profiles').select('*').eq('id', user.id).single()).data;
   if (profile && profile.role === 'admin') {
@@ -249,13 +249,15 @@ async function loadPrivate() {
       studioBookings = b.data || []; payouts = po.data || []; ownWaivers = ow.data || []; studioSignatures = sg.data || [];
     }
   } else {
-    const [k, b, w, l, sg] = await Promise.all([
+    const [k, b, w, l, sg, pd] = await Promise.all([
       sb.from('kids').select('*').order('created_at'),
       sb.from('bookings').select('*').eq('user_id', user.id),
       sb.rpc('my_waitlist'),
       sb.from('credit_ledger').select('delta, reason, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(200),
       sb.from('waiver_signatures').select('*').eq('user_id', user.id).order('signed_at', { ascending: false }),
+      sb.rpc('partner_dashboard'),
     ]);
+    myPartner = pd.error ? null : pd.data;
     const mine = b.data || []; myWaitlist = w.data || []; myLedger = l.data || []; mySignatures = sg.data || [];
     kids = k.data || []; myBookings = mine.filter(x => x.session_date >= todayStr); pastBookings = mine.filter(x => x.session_date < todayStr);
   }
@@ -1132,6 +1134,7 @@ function renderProfile() {
       <div class="meta" style="margin-bottom:12px">${esc(user.email)}</div>
       ${isStudio ? '' : `<div class="meta" style="margin-bottom:10px">${T('Language')}: <a class="lnk" data-lang="en">${LANG === 'en' ? '<b>English</b>' : 'English'}</a> · <a class="lnk" data-lang="es">${LANG === 'es' ? '<b>Español</b>' : 'Español'}</a></div>`}
       <button class="btn ghost" data-logout>${T('Log out')}</button>`}</div>
+    ${isStudio ? '' : partnerPanel()}
     ${isStudio ? '' : `<div class="panel">
       <div class="label">${T('Add a child')}</div><input id="kidName" placeholder="${T('Name')}">
       <div class="label">${T('Birthday')}</div><input id="kidBday" type="date">
@@ -1756,10 +1759,48 @@ function growthMembers(rep) {
   });
   return by;
 }
+
+// What a partner has earned, been paid, and is still owed. "Other" payments (focus groups, monthly support, gift cards) are tracked but not part of "earned".
+function partnerTotals(m, studs, pays) {
+  const feesE = studs.reduce((t, s) => t + (s.fees || 0), 0);
+  const cents = ok => pays.filter(x => ok(x.kind)).reduce((t, x) => t + x.amount_cents, 0) / 100;
+  const paidC = cents(k => k !== 'other'), paidO = cents(k => k === 'other');
+  return { feesE, earned: m.earned + feesE, paidC, paidO, owed: m.earned + feesE - paidC };
+}
+const monthBoxes = win => `<div style="margin-top:6px">${win.map(w => `<span title="${w.key}" style="display:inline-block;min-width:36px;text-align:center;padding:3px 6px;border-radius:8px;margin:2px 4px 2px 0;font-weight:700;background:${w.hit ? '#d8f1e3' : '#f3efe9'};${w.future ? 'opacity:.45' : ''}">${w.n}${w.current ? '*' : ''}</span>`).join('')}</div>`;
+const payRows = pays => pays.map(x => `<div class="hist"><div><div>$${(x.amount_cents / 100).toFixed(2)} · ${esc({ members: 'Families', studios: 'Studio fees', other: 'Other' }[x.kind] || x.kind)}</div>
+  <div class="meta">${fmtDate(x.paid_on + 'T12:00:00')}${x.note ? ' · ' + esc(x.note) : ''}</div></div>${x.id ? `<button class="btn ghost" style="padding:6px 10px;font-size:13px" data-delpay="${esc(x.id)}">Delete</button>` : ''}</div>`).join('');
+// Shown on the Family tab to anyone whose login is linked to a partner code. Counts only: no family names, no studio contact details.
+function partnerPanel() {
+  if (!myPartner || !myPartner.length) return '';
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }), base = location.origin + location.pathname;
+  const link = (label, url) => `<div class="hist"><div><div>${label}</div><div class="meta" style="word-break:break-all">${esc(url)}</div></div><button class="btn ghost" style="padding:6px 10px;font-size:13px" data-copylink="${esc(url)}">Copy</button></div>`;
+  return myPartner.map(p => {
+    const m = growthMembers(p.members.map(x => ({ ...x, code: p.code })))[p.code] || { signups: 0, paid: 0, qualified: 0, earned: 0 };
+    const studs = growthStudios(p.studios, today), t = partnerTotals(m, studs, p.payments), q = studs.filter(s => s.qualified).length;
+    return `<div class="panel"><div class="label">🤝 Partner dashboard${p.active ? '' : ' (code paused)'}</div>
+      <div class="stats"><div class="stat"><b>${m.signups}</b>families signed up</div><div class="stat"><b>${m.qualified}</b>paid 60+ days</div>
+        <div class="stat"><b>${studs.length}</b>studios</div><div class="stat"><b>${q}</b>studios qualified</div></div>
+      <div class="hist"><div>Earned from families</div><b>$${m.earned}</b></div>
+      <div class="hist"><div>Earned from studios</div><b>$${t.feesE}</b></div>
+      <div class="hist"><div>Paid so far (families and studios)</div><b>$${t.paidC.toFixed(2)}</b></div>
+      <div class="hist"><div><b>Still owed</b></div><b>$${t.owed.toFixed(2)}</b></div>
+      ${t.paidO ? `<div class="hist"><div>Other payments (support, focus groups, gift cards)</div><b>$${t.paidO.toFixed(2)}</b></div>` : ''}
+      <div class="label" style="margin-top:12px">Your links</div>
+      ${link('Families, your own outreach ($' + REF_RATE.referral + ' each)', `${base}?ref=${p.code}`)}
+      ${link('Families from paid ads ($' + REF_RATE.ad + ' each)', `${base}?ref=${p.code}&src=ad`)}
+      ${link('Families from studio flyers and emails ($' + REF_RATE.studio + ' each)', `${base}?ref=${p.code}&src=studio`)}
+      ${link('Studios to sign up', `${base}?ref=${p.code}#join-studio`)}
+      ${studs.length ? `<div class="label" style="margin-top:12px">Your studios: completed bookings by month</div><p class="meta" style="margin:0 0 6px">Green = ${MONTH_GOAL}+ in a month. ${MONTHS_TO_QUALIFY} green months in a studio's first ${WINDOW} qualify it. * is the month so far.</p>
+        ${studs.map(s => `<div style="padding:8px 0;border-top:1px solid var(--line)"><b>${esc(s.name)}</b><div class="meta">First booking ${s.first ? fmtDate(s.first + 'T12:00:00') : 'none yet'} · ${s.hits} of ${MONTHS_TO_QUALIFY} good months${s.qualified ? ' ✅' : ''} · fees earned $${s.fees}</div>${s.win.length ? monthBoxes(s.win) : ''}</div>`).join('')}` : ''}
+      ${p.payments.length ? `<div class="label" style="margin-top:12px">Payments</div>${payRows(p.payments.map(x => ({ ...x, id: null })))}` : ''}
+      <p class="meta" style="margin:10px 0 0">Families count after they have paid for 60 days and are still subscribed. Bonuses are paid by LittlePass after checking for refunds. Numbers update as bookings happen.</p></div>`;
+  }).join('');
+}
 async function loadAdminGrowth() {
-  const rs = await Promise.all([sb.rpc('admin_list_referrers'), sb.rpc('admin_referral_report'), sb.rpc('admin_studio_months'), sb.rpc('admin_excluded_accounts')]);
+  const rs = await Promise.all([sb.rpc('admin_list_referrers'), sb.rpc('admin_referral_report'), sb.rpc('admin_studio_months'), sb.rpc('admin_excluded_accounts'), sb.rpc('admin_list_partner_payments')]);
   const bad = rs.find(r => r.error);
-  adminGrowth = bad ? { error: bad.error.message } : { refs: rs[0].data, rep: rs[1].data, studs: rs[2].data, excl: rs[3].data };
+  adminGrowth = bad ? { error: bad.error.message } : { refs: rs[0].data, rep: rs[1].data, studs: rs[2].data, excl: rs[3].data, pays: rs[4].data };
   if (currentView === 'admin' && adminTab === 'growth') renderAdmin();
 }
 function renderAdminGrowth(el) {
@@ -1771,9 +1812,23 @@ function renderAdminGrowth(el) {
   const copy = (label, url) => `<div class="hist"><div><div>${label}</div><div class="meta" style="word-break:break-all">${esc(url)}</div></div><button class="btn ghost" style="padding:6px 10px;font-size:13px" data-copylink="${esc(url)}">Copy</button></div>`;
   const refs = G.refs.map(r => {
     const m = mem[r.code] || { signups: 0, paid: 0, qualified: 0, earned: 0 }, mine = studs.filter(s => s.code === r.code);
-    return `<div class="panel"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><div><b>${esc(r.name)}</b> <span class="tag">${esc(r.code)}</span>${r.active ? '' : ' <span class="tag">paused</span>'}</div>
-        <button class="btn ghost" style="padding:6px 10px;font-size:13px" data-refmembers="${esc(r.code)}">See families</button></div>
-      <div class="meta" style="margin:6px 0">${m.signups} signed up · ${m.paid} have paid · <b>${m.qualified}</b> paid 60+ days = <b>$${m.earned}</b> earned · ${mine.length} studio${mine.length === 1 ? '' : 's'} sourced</div>
+    const pays = G.pays.filter(x => x.code === r.code), t = partnerTotals(m, mine, pays), c = esc(r.code);
+    return `<div class="panel"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><div><b>${esc(r.name)}</b> <span class="tag">${c}</span>${r.active ? '' : ' <span class="tag">paused</span>'}</div>
+        <div style="display:flex;gap:6px"><button class="btn ghost" style="padding:6px 10px;font-size:13px" data-refmembers="${c}">See families</button>
+        <button class="btn ghost" style="padding:6px 10px;font-size:13px" data-togglepartner="${c}">${r.active ? 'Pause' : 'Resume'}</button></div></div>
+      <div class="meta" style="margin:6px 0">${m.signups} signed up · ${m.paid} have paid · <b>${m.qualified}</b> paid 60+ days · ${mine.length} studio${mine.length === 1 ? '' : 's'} sourced${r.active ? '' : ' · new sign-ups with this code are not credited while paused'}</div>
+      <div class="hist"><div>Earned: families $${m.earned} + studios $${t.feesE}</div><b>$${t.earned}</b></div>
+      <div class="hist"><div>Paid (families and studios)</div><b>$${t.paidC.toFixed(2)}</b></div>
+      <div class="hist"><div><b>Still owed</b></div><b>$${t.owed.toFixed(2)}</b></div>
+      ${t.paidO ? `<div class="hist"><div>Other payments (support, focus groups, gift cards)</div><b>$${t.paidO.toFixed(2)}</b></div>` : ''}
+      ${pays.length ? `<div class="label" style="margin-top:10px">Payments</div>${payRows(pays)}` : ''}
+      <div class="label" style="margin-top:10px">Log a payment</div>
+      <div style="display:grid;grid-template-columns:90px 1fr;gap:8px"><input data-payamt="${c}" inputmode="decimal" placeholder="$ amount" style="margin:0">
+        <select data-paykind="${c}" style="margin:0"><option value="members">Families</option><option value="studios">Studio fees</option><option value="other">Other (focus group, support, gift card)</option></select></div>
+      <div style="display:flex;gap:8px;margin-top:8px"><input data-paynote="${c}" maxlength="200" placeholder="Note, e.g. Venmo, October" style="margin:0"><button class="btn" data-addpay="${c}">Log it</button></div>
+      <div class="label" style="margin-top:10px">Their login (so they can see their own numbers)</div>
+      <div style="display:flex;gap:8px"><input data-linkemail="${c}" type="email" value="${esc(r.login_email || '')}" placeholder="Their account email" style="margin:0"><button class="btn ghost" data-linkpartner="${c}">${r.login_email ? 'Update' : 'Link'}</button></div>
+      <div class="meta" style="margin-top:4px">They sign up as a normal account first. They then see a Partner dashboard on their Family tab: counts only, no names or emails. Clear the box and press Update to remove access.</div>
       ${copy('Families, own outreach ($' + REF_RATE.referral + ' each)', `${base}?ref=${r.code}`)}
       ${copy('Families from paid ads ($' + REF_RATE.ad + ' each)', `${base}?ref=${r.code}&src=ad`)}
       ${copy('Families from studio flyers and emails ($' + REF_RATE.studio + ' each)', `${base}?ref=${r.code}&src=studio`)}
@@ -1783,7 +1838,7 @@ function renderAdminGrowth(el) {
   const stRows = studs.map(s => `<div class="panel"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b>${esc(s.name)}</b>
       <select data-studioref="${esc(s.id)}" style="margin:0;max-width:200px"><option value="">Sourced by: nobody (ours)</option>${G.refs.map(r => `<option value="${esc(r.code)}" ${s.code === r.code ? 'selected' : ''}>Sourced by: ${esc(r.name)}</option>`).join('')}</select></div>
     <div class="meta" style="margin-top:4px">Live ${s.live ? fmtDate(s.live) : '–'} · first booking ${s.first ? fmtDate(s.first) : 'none yet'}</div>
-    ${s.win.length ? `<div style="margin-top:6px">${s.win.map(w => `<span title="${w.key}" style="display:inline-block;min-width:36px;text-align:center;padding:3px 6px;border-radius:8px;margin:2px 4px 2px 0;font-weight:700;background:${w.hit ? '#d8f1e3' : '#f3efe9'};${w.future ? 'opacity:.45' : ''}">${w.n}${w.current ? '*' : ''}</span>`).join('')}</div>
+    ${s.win.length ? `${monthBoxes(s.win)}
       <div class="meta" style="margin-top:4px"><b>${s.hits} of ${MONTHS_TO_QUALIFY}</b> months with ${MONTH_GOAL}+ bookings${s.qualified ? ' ✅ qualified' : ''}${s.code ? ` · fees earned <b>$${s.fees}</b>${s.qualified ? ` · +${EQUITY_PER_STUDIO}% equity` : ''}` : ''}</div>` : ''}</div>`).join('') || '<div class="meta">No live studios yet.</div>';
   el.innerHTML = head + `<p class="meta" style="margin:0">For paying partners who bring in families and studios. Only you can see this page.</p>
     <div class="panel"><div class="label">Partners and their links</div>${refs}
@@ -2100,6 +2155,14 @@ async function handleClick(e) {
   if (hit('[data-refreshstats]')) { adminStats = null; renderAdmin(); return; }
   if (hit('[data-refreshgrowth]')) { adminGrowth = null; renderAdmin(); return; }
   if ((el = hit('[data-copylink]'))) { try { await navigator.clipboard.writeText(el.dataset.copylink); toast('Link copied'); } catch (e) { toast('Copy failed. Select the link and copy it by hand.'); } return; }
+  if ((el = hit('[data-togglepartner]'))) { const r = adminGrowth.refs.find(x => x.code === el.dataset.togglepartner); if (r) growthAction(sb.rpc('admin_save_referrer', { p_code: r.code, p_name: r.name, p_note: r.note, p_active: !r.active }), r.active ? 'Paused' : 'Resumed'); return; }
+  if ((el = hit('[data-linkpartner]'))) { const c = el.dataset.linkpartner; growthAction(sb.rpc('admin_link_partner_user', { p_code: c, p_email: document.querySelector(`[data-linkemail="${c}"]`).value }), 'Saved'); return; }
+  if ((el = hit('[data-addpay]'))) {
+    const c = el.dataset.addpay, q = k => document.querySelector(`[data-pay${k}="${c}"]`), cents = Math.round(parseFloat(String(q('amt').value).replace(/[$,\s]/g, '')) * 100);
+    if (!(cents > 0)) { toast('Enter the amount you paid'); return; }
+    growthAction(sb.rpc('admin_add_partner_payment', { p_code: c, p_amount_cents: cents, p_kind: q('kind').value, p_note: q('note').value, p_paid_on: null }), 'Payment logged'); return;
+  }
+  if ((el = hit('[data-delpay]'))) { if (confirm('Delete this payment record?')) growthAction(sb.rpc('admin_delete_partner_payment', { p_id: el.dataset.delpay }), 'Deleted'); return; }
   if (hit('[data-saveref]')) { growthAction(sb.rpc('admin_save_referrer', { p_code: $('#grCode').value, p_name: $('#grName').value, p_note: null, p_active: true }), 'Partner saved'); return; }
   if ((el = hit('[data-refmembers]'))) { showRefMembers(el.dataset.refmembers); return; }
   if (hit('[data-excludeadd]')) { growthAction(sb.rpc('admin_set_bonus_excluded', { p_email: $('#exEmail').value, p_excluded: true }), 'Account excluded'); return; }
