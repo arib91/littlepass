@@ -357,7 +357,7 @@ const isStudioUser = () => !!(user && profile && profile.role === 'studio');
 function renderNav() {
   const pend = adminStudios.filter(s => s.status === 'pending').length;
   const items = isAdmin()
-    ? [['a-stats', '📊', 'Stats'], ['a-studios', '🏢', 'Studios' + (pend ? ` (${pend})` : '')], ['a-people', '👥', 'People'], ['a-payouts', '💸', 'Payouts' + (adminPayouts.some(p => p.status === 'pending') ? ' •' : '')], ['a-reports', '🚩', 'Reports' + (adminReports.length ? ` (${adminReports.length})` : '')], ['a-account', '⚙️', 'Account']]
+    ? [['a-stats', '📊', 'Stats'], ['a-studios', '🏢', 'Studios' + (pend ? ` (${pend})` : '')], ['a-people', '👥', 'People'], ['a-payouts', '💸', 'Payouts' + (adminPayouts.some(p => p.status === 'pending') ? ' •' : '')], ['a-growth', '🤝', 'Growth'], ['a-reports', '🚩', 'Reports' + (adminReports.length ? ` (${adminReports.length})` : '')], ['a-account', '⚙️', 'Account']]
     : isStudioUser()
     ? [['o-overview', '📊', 'Overview'], ['o-classes', '📚', 'Classes'], ['o-bookings', '📅', 'Bookings'], ['o-page', '🖼️', 'Page'], ['o-earnings', '💰', 'Earnings'], ['o-account', '⚙️', 'Account']]
     : [['explore', '🔍', T('Explore')], ['bookings', '📅', T('My classes')], ['plans', '⭐', T('Plans')], ['profile', '👶', T('Family')]];
@@ -1737,8 +1737,14 @@ function studioProgress(months, first, today) {
     const key = new Date(Date.UTC(y, m - 1 + i, 1)).toISOString().slice(0, 7), n = by[key] || 0;
     win.push({ key, n, hit: n >= MONTH_GOAL, future: key > now, current: key === now });
   }
-  const hits = win.filter(w => w.hit).length;
-  return { win, hits, qualified: hits >= MONTHS_TO_QUALIFY };
+  const good = win.filter(w => w.hit), hits = good.length;
+  // The day it qualified: the end of the month with its 3rd good month, or today if that month is still running
+  let qualifiedOn = null;
+  if (hits >= MONTHS_TO_QUALIFY) {
+    const [yy, mm] = good[MONTHS_TO_QUALIFY - 1].key.split('-').map(Number), end = new Date(Date.UTC(yy, mm, 0)).toISOString().slice(0, 10);
+    qualifiedOn = end > today ? today : end;
+  }
+  return { win, hits, qualified: hits >= MONTHS_TO_QUALIFY, qualifiedOn };
 }
 function growthStudios(rows, today) {
   const by = new Map();
@@ -1777,7 +1783,7 @@ function partnerPanel() {
   const link = (label, url) => `<div class="hist"><div><div>${label}</div><div class="meta" style="word-break:break-all">${esc(url)}</div></div><button class="btn ghost" style="padding:6px 10px;font-size:13px" data-copylink="${esc(url)}">Copy</button></div>`;
   return myPartner.map(p => {
     const m = growthMembers(p.members.map(x => ({ ...x, code: p.code })))[p.code] || { signups: 0, paid: 0, qualified: 0, earned: 0 };
-    const studs = growthStudios(p.studios, today), t = partnerTotals(m, studs, p.payments), q = studs.filter(s => s.qualified).length;
+    const studs = growthStudios(p.studios, today), t = partnerTotals(m, studs, p.payments), eq = equitySummary(studs, p.working_until, p.member_tiers, p.tiers, p.milestones, p.paying_members), q = eq.counted;
     return `<div class="panel"><div class="label">🤝 Partner dashboard${p.active ? '' : ' (code paused)'}</div>
       <div class="stats"><div class="stat"><b>${m.signups}</b>families signed up</div><div class="stat"><b>${m.qualified}</b>paid 60+ days</div>
         <div class="stat"><b>${studs.length}</b>studios</div><div class="stat"><b>${q}</b>studios qualified</div></div>
@@ -1786,6 +1792,7 @@ function partnerPanel() {
       <div class="hist"><div>Paid so far (families and studios)</div><b>$${t.paidC.toFixed(2)}</b></div>
       <div class="hist"><div><b>Still owed</b></div><b>$${t.owed.toFixed(2)}</b></div>
       ${t.paidO ? `<div class="hist"><div>Other payments (support, focus groups, gift cards)</div><b>$${t.paidO.toFixed(2)}</b></div>` : ''}
+      <div class="label" style="margin-top:12px">Equity milestones</div>${equityBlock(eq, p, today, false)}
       <div class="label" style="margin-top:12px">Your links</div>
       ${link('Families, your own outreach ($' + REF_RATE.referral + ' each)', `${base}?ref=${p.code}`)}
       ${link('Families from paid ads ($' + REF_RATE.ad + ' each)', `${base}?ref=${p.code}&src=ad`)}
@@ -1797,62 +1804,116 @@ function partnerPanel() {
       <p class="meta" style="margin:10px 0 0">Families count after they have paid for 60 days and are still subscribed. Bonuses are paid by LittlePass after checking for refunds. Numbers update as bookings happen.</p></div>`;
   }).join('');
 }
+const CLIFF_MONTHS = 12;
+const addMonthsISO = (iso, n) => { const [y, m, d] = iso.split('-').map(Number); return new Date(Date.UTC(y, m - 1 + n, d)).toISOString().slice(0, 10); };
+// Equity earned so far. Studios count once qualified (0.1% each, cap 10%) and only if they qualified before the partner stopped working.
+// Member tiers (set in the database): the TOTAL equity at each number of paying members; only the highest tier reached while working counts.
+function equitySummary(studs, workingUntil, hasTiers, tiers, miles, paying) {
+  const counted = studs.filter(s => s.qualified && (!workingUntil || (s.qualifiedOn || '') <= workingUntil));
+  const studioPct = Math.min(10, Math.round(counted.length * EQUITY_PER_STUDIO * 100) / 100);
+  const ts = hasTiers ? (tiers || []).map(t => {
+    const m = (miles || []).find(x => +x.tier === +t.tier), reachedOn = m ? String(m.reached_on).slice(0, 10) : null;
+    return { tier: +t.tier, members: +t.members, pct: +t.equity_pct, reachedOn, counted: !!reachedOn && (!workingUntil || reachedOn <= workingUntil),
+      progress: Math.min(100, Math.round(100 * (paying || 0) / +t.members)) };
+  }) : [];
+  const memberPct = ts.filter(t => t.counted).reduce((mx, t) => Math.max(mx, t.pct), 0);
+  return { counted: counted.length, studioPct, tiers: ts, memberPct, total: Math.round((studioPct + memberPct) * 100) / 100 };
+}
+function equityBlock(eq, p, today, admin) {
+  const cliff = p.started_on ? addMonthsISO(String(p.started_on).slice(0, 10), CLIFF_MONTHS) : null;
+  const bar = pct => `<div style="height:6px;background:#eee;border-radius:4px;margin:4px 0"><div style="height:6px;width:${pct}%;background:var(--brand);border-radius:4px"></div></div>`;
+  const day = d => fmtDate(String(d).slice(0, 10) + 'T12:00:00');
+  return `<div class="hist"><div><b>Equity so far</b><div class="meta">${admin ? 'Not granted until the agreement is signed. Cliff and leaver rules: ask Jason.' : 'Subject to the partner agreement.'}</div></div><b>${eq.total}%</b></div>
+    <div class="hist"><div>Studios: ${eq.counted} qualified × ${EQUITY_PER_STUDIO}% (cap 10%)</div><b>${eq.studioPct}%</b></div>
+    ${eq.tiers.map(t => `<div style="padding:6px 0;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;gap:8px"><span>${t.members.toLocaleString()} paying members → ${t.pct}% total</span>
+      <b>${t.counted ? '✅ ' + day(t.reachedOn) : t.reachedOn ? 'reached after they left' : t.progress + '%'}</b></div>${t.reachedOn ? '' : bar(t.progress)}</div>`).join('')}
+    ${admin && !eq.tiers.length ? '<div class="meta">Member-count tiers are off for this partner (turn them on under Terms and login).</div>' : ''}
+    <div class="meta" style="margin-top:6px">${p.started_on ? 'Started ' + day(p.started_on) + ' · ' : ''}${p.working_until ? 'Stopped working ' + day(p.working_until) + ' ⛔' : 'Still working ✅'}${cliff ? ` · 12-month cliff ${cliff <= today ? 'passed' : 'on ' + day(cliff)}` : ''}</div>`;
+}
 async function loadAdminGrowth() {
-  const rs = await Promise.all([sb.rpc('admin_list_referrers'), sb.rpc('admin_referral_report'), sb.rpc('admin_studio_months'), sb.rpc('admin_excluded_accounts'), sb.rpc('admin_list_partner_payments')]);
+  await sb.rpc('admin_refresh_milestones');   // records any equity tier reached since last night
+  const rs = await Promise.all([sb.rpc('admin_list_referrers'), sb.rpc('admin_referral_report'), sb.rpc('admin_studio_months'), sb.rpc('admin_excluded_accounts'),
+    sb.rpc('admin_list_partner_payments'), sb.rpc('admin_member_tiers'), sb.rpc('admin_partner_milestones'), sb.rpc('admin_paying_members')]);
   const bad = rs.find(r => r.error);
-  adminGrowth = bad ? { error: bad.error.message } : { refs: rs[0].data, rep: rs[1].data, studs: rs[2].data, excl: rs[3].data, pays: rs[4].data };
+  adminGrowth = bad ? { error: bad.error.message } : { refs: rs[0].data, rep: rs[1].data, studs: rs[2].data, excl: rs[3].data, pays: rs[4].data, tiers: rs[5].data, miles: rs[6].data, paying: rs[7].data || 0 };
   if (currentView === 'admin' && adminTab === 'growth') renderAdmin();
 }
+// Which sections of the Growth tab are open stays put when the screen refreshes
+const growthOpen = new Map();
+const gdet = (k, title, body, dflt) => `<details data-gkey="${esc(k)}" ${growthOpen.has(k) ? (growthOpen.get(k) ? 'open' : '') : (dflt ? 'open' : '')} style="margin-top:8px"><summary style="cursor:pointer;font-weight:700">${title}</summary><div style="margin-top:6px">${body}</div></details>`;
 function renderAdminGrowth(el) {
   const head = '<div style="display:flex;justify-content:space-between;align-items:center;margin:24px 0 4px"><h2 style="margin:0">Growth</h2><button class="btn ghost" data-refreshgrowth>↻ Refresh</button></div>';
   if (!adminGrowth) { el.innerHTML = head + '<div class="empty">Loading… 🤝</div>'; loadAdminGrowth(); return; }
-  if (adminGrowth.error) { el.innerHTML = head + `<div class="panel"><b>Couldn't load this.</b><div class="meta">${esc(adminGrowth.error)}</div><div class="meta" style="margin-top:6px">If it mentions a missing function or table, run <b>supabase/025_referrals.sql</b> in the Supabase SQL Editor first.</div></div>`; return; }
-  const G = adminGrowth, today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  if (adminGrowth.error) { el.innerHTML = head + `<div class="panel"><b>Couldn't load this.</b><div class="meta">${esc(adminGrowth.error)}</div><div class="meta" style="margin-top:6px">If it mentions a missing function or table, run <b>supabase/025_referrals.sql</b>, <b>026_partner_tools.sql</b> and <b>027_partner_equity.sql</b> in the Supabase SQL Editor, in that order.</div></div>`; return; }
+  const G = adminGrowth, today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }), paying = G.paying;
   const base = location.origin + location.pathname, mem = growthMembers(G.rep), studs = growthStudios(G.studs, today);
   const copy = (label, url) => `<div class="hist"><div><div>${label}</div><div class="meta" style="word-break:break-all">${esc(url)}</div></div><button class="btn ghost" style="padding:6px 10px;font-size:13px" data-copylink="${esc(url)}">Copy</button></div>`;
-  const refs = G.refs.map(r => {
-    const m = mem[r.code] || { signups: 0, paid: 0, qualified: 0, earned: 0 }, mine = studs.filter(s => s.code === r.code);
-    const pays = G.pays.filter(x => x.code === r.code), t = partnerTotals(m, mine, pays), c = esc(r.code);
-    return `<div class="panel"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><div><b>${esc(r.name)}</b> <span class="tag">${c}</span>${r.active ? '' : ' <span class="tag">paused</span>'}</div>
-        <div style="display:flex;gap:6px"><button class="btn ghost" style="padding:6px 10px;font-size:13px" data-refmembers="${c}">See families</button>
-        <button class="btn ghost" style="padding:6px 10px;font-size:13px" data-togglepartner="${c}">${r.active ? 'Pause' : 'Resume'}</button></div></div>
-      <div class="meta" style="margin:6px 0">${m.signups} signed up · ${m.paid} have paid · <b>${m.qualified}</b> paid 60+ days · ${mine.length} studio${mine.length === 1 ? '' : 's'} sourced${r.active ? '' : ' · new sign-ups with this code are not credited while paused'}</div>
-      <div class="hist"><div>Earned: families $${m.earned} + studios $${t.feesE}</div><b>$${t.earned}</b></div>
-      <div class="hist"><div>Paid (families and studios)</div><b>$${t.paidC.toFixed(2)}</b></div>
-      <div class="hist"><div><b>Still owed</b></div><b>$${t.owed.toFixed(2)}</b></div>
-      ${t.paidO ? `<div class="hist"><div>Other payments (support, focus groups, gift cards)</div><b>$${t.paidO.toFixed(2)}</b></div>` : ''}
-      ${pays.length ? `<div class="label" style="margin-top:10px">Payments</div>${payRows(pays)}` : ''}
+  const rows = G.refs.map(r => {
+    const m = mem[r.code] || { signups: 0, paid: 0, qualified: 0, earned: 0 }, mine = studs.filter(s => s.code === r.code), pays = G.pays.filter(x => x.code === r.code);
+    return { r, m, mine, pays, t: partnerTotals(m, mine, pays), eq: equitySummary(mine, r.working_until, r.equity_member_tiers, G.tiers, G.miles.filter(x => x.code === r.code), paying) };
+  });
+  const T0 = rows.reduce((a, x) => ({ owed: a.owed + x.t.owed, paid: a.paid + x.t.paidC + x.t.paidO, fam: a.fam + x.m.signups, fq: a.fq + x.m.qualified, st: a.st + x.mine.length, sq: a.sq + x.eq.counted }), { owed: 0, paid: 0, fam: 0, fq: 0, st: 0, sq: 0 });
+  const first = G.tiers[0];
+  const tiles = `<div class="stats">
+    <div class="stat"><b>${rows.filter(x => x.r.active && !x.r.working_until).length}</b>active partners<div class="meta">${rows.length} in total</div></div>
+    <div class="stat"><b>${T0.fam}</b>families credited<div class="meta">${T0.fq} paid 60+ days</div></div>
+    <div class="stat"><b>${T0.st}</b>studios sourced<div class="meta">${T0.sq} qualified</div></div>
+    <div class="stat"><b>$${T0.owed.toFixed(0)}</b>owed to partners<div class="meta">$${T0.paid.toFixed(0)} paid so far</div></div>
+    <div class="stat"><b>${paying.toLocaleString()}</b>paying members${first ? `<div class="meta">${first.members.toLocaleString()} for the first equity tier</div>` : ''}</div></div>`;
+  const cards = rows.map(({ r, m, mine, pays, t, eq }) => {
+    const c = esc(r.code), k = 'p:' + r.code, off = !r.active || r.working_until;
+    const studiosHtml = mine.length ? mine.map(s => `<div style="padding:8px 0;border-top:1px solid var(--line)"><b>${esc(s.name)}</b>
+        <div class="meta">Live ${s.live ? fmtDate(s.live + 'T12:00:00') : '–'} · first booking ${s.first ? fmtDate(s.first + 'T12:00:00') : 'none yet'} · <b>${s.hits} of ${MONTHS_TO_QUALIFY}</b> good months${s.qualified ? ' ✅' : ''} · fees $${s.fees}</div>${s.win.length ? monthBoxes(s.win) : ''}</div>`).join('')
+      : '<p class="meta">No studios credited yet.</p>';
+    const payHtml = `${pays.length ? payRows(pays) : '<p class="meta">Nothing logged yet.</p>'}
       <div class="label" style="margin-top:10px">Log a payment</div>
       <div style="display:grid;grid-template-columns:90px 1fr;gap:8px"><input data-payamt="${c}" inputmode="decimal" placeholder="$ amount" style="margin:0">
         <select data-paykind="${c}" style="margin:0"><option value="members">Families</option><option value="studios">Studio fees</option><option value="other">Other (focus group, support, gift card)</option></select></div>
-      <div style="display:flex;gap:8px;margin-top:8px"><input data-paynote="${c}" maxlength="200" placeholder="Note, e.g. Venmo, October" style="margin:0"><button class="btn" data-addpay="${c}">Log it</button></div>
-      <div class="label" style="margin-top:10px">Their login (so they can see their own numbers)</div>
+      <div style="display:flex;gap:8px;margin-top:8px"><input data-paynote="${c}" maxlength="200" placeholder="Note, e.g. Venmo, October" style="margin:0"><button class="btn" data-addpay="${c}">Log it</button></div>`;
+    const termsHtml = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><div class="label">Started</div><input type="date" data-termstart="${c}" value="${esc(r.started_on || '')}" style="margin:0"></div>
+        <div><div class="label">Stopped working</div><input type="date" data-termend="${c}" value="${esc(r.working_until || '')}" style="margin:0"></div></div>
+      <div class="meta" style="margin-top:4px">Leave "stopped working" empty while they are still working. Equity from studios or member tiers that came after this date does not count.</div>
+      <label class="consent" style="margin-top:8px"><input type="checkbox" data-termtiers="${c}" ${r.equity_member_tiers ? 'checked' : ''} style="width:auto;margin:3px 8px 0 0"><span>Earns the member-count equity tiers (${G.tiers.map(x => `${x.members.toLocaleString()} → ${x.equity_pct}%`).join(', ')})</span></label>
+      <button class="btn" data-saveterms="${c}" style="margin-top:8px">Save terms</button>
+      <div class="label" style="margin-top:14px">Their login (so they can see their own numbers)</div>
       <div style="display:flex;gap:8px"><input data-linkemail="${c}" type="email" value="${esc(r.login_email || '')}" placeholder="Their account email" style="margin:0"><button class="btn ghost" data-linkpartner="${c}">${r.login_email ? 'Update' : 'Link'}</button></div>
-      <div class="meta" style="margin-top:4px">They sign up as a normal account first. They then see a Partner dashboard on their Family tab: counts only, no names or emails. Clear the box and press Update to remove access.</div>
-      ${copy('Families, own outreach ($' + REF_RATE.referral + ' each)', `${base}?ref=${r.code}`)}
-      ${copy('Families from paid ads ($' + REF_RATE.ad + ' each)', `${base}?ref=${r.code}&src=ad`)}
-      ${copy('Families from studio flyers and emails ($' + REF_RATE.studio + ' each)', `${base}?ref=${r.code}&src=studio`)}
-      ${copy('Studios to sign up', `${base}?ref=${r.code}#join-studio`)}</div>`;
-  }).join('') || '<div class="meta">No partners yet. Add one below.</div>';
-  const qualified = studs.filter(s => s.code && s.qualified).length;
-  const stRows = studs.map(s => `<div class="panel"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b>${esc(s.name)}</b>
+      <div class="meta" style="margin-top:4px">They sign up as a normal account first, then see a Partner dashboard on their Family tab: counts only, no names or emails. Clear the box and press Update to remove access.</div>`;
+    const linksHtml = copy('Families, own outreach ($' + REF_RATE.referral + ' each)', `${base}?ref=${r.code}`) + copy('Families from paid ads ($' + REF_RATE.ad + ' each)', `${base}?ref=${r.code}&src=ad`)
+      + copy('Families from studio flyers and emails ($' + REF_RATE.studio + ' each)', `${base}?ref=${r.code}&src=studio`) + copy('Studios to sign up', `${base}?ref=${r.code}#join-studio`);
+    return `<div class="panel" style="border-left:4px solid ${off ? '#c9c3d6' : 'var(--brand)'}">
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><div><b style="font-size:17px">${esc(r.name)}</b> <span class="tag">${c}</span>${r.active ? '' : ' <span class="tag">paused</span>'}${r.working_until ? ' <span class="tag">stopped working</span>' : ''}</div>
+        <div style="display:flex;gap:6px"><button class="btn ghost" style="padding:6px 10px;font-size:13px" data-refmembers="${c}">See families</button>
+        <button class="btn ghost" style="padding:6px 10px;font-size:13px" data-togglepartner="${c}">${r.active ? 'Pause' : 'Resume'}</button></div></div>
+      <div class="stats" style="margin-top:8px">
+        <div class="stat"><b>${m.signups}</b>families<div class="meta">${m.paid} paid · ${m.qualified} paid 60+ days</div></div>
+        <div class="stat"><b>${mine.length}</b>studios<div class="meta">${eq.counted} qualified</div></div>
+        <div class="stat"><b>$${t.earned}</b>earned<div class="meta">families $${m.earned} · studios $${t.feesE}</div></div>
+        <div class="stat"><b>$${t.owed.toFixed(0)}</b>still owed<div class="meta">paid $${(t.paidC + t.paidO).toFixed(0)} so far</div></div></div>
+      ${r.active ? '' : '<div class="meta">Paused: new sign-ups through this code are not credited.</div>'}
+      <div class="label" style="margin-top:10px">Equity</div>${equityBlock(eq, r, today, true)}
+      ${gdet(k + ':studios', `Studios (${mine.length})`, studiosHtml, mine.length > 0)}
+      ${gdet(k + ':pay', `Payments (${pays.length})`, payHtml)}
+      ${gdet(k + ':terms', 'Terms and login', termsHtml)}
+      ${gdet(k + ':links', 'Links to share', linksHtml)}</div>`;
+  }).join('') || '<div class="panel"><p class="meta" style="margin:0">No partners yet. Add one below.</p></div>';
+  const stRows = studs.map(s => `<div style="padding:8px 0;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b>${esc(s.name)}</b>
       <select data-studioref="${esc(s.id)}" style="margin:0;max-width:200px"><option value="">Sourced by: nobody (ours)</option>${G.refs.map(r => `<option value="${esc(r.code)}" ${s.code === r.code ? 'selected' : ''}>Sourced by: ${esc(r.name)}</option>`).join('')}</select></div>
-    <div class="meta" style="margin-top:4px">Live ${s.live ? fmtDate(s.live) : '–'} · first booking ${s.first ? fmtDate(s.first) : 'none yet'}</div>
-    ${s.win.length ? `${monthBoxes(s.win)}
-      <div class="meta" style="margin-top:4px"><b>${s.hits} of ${MONTHS_TO_QUALIFY}</b> months with ${MONTH_GOAL}+ bookings${s.qualified ? ' ✅ qualified' : ''}${s.code ? ` · fees earned <b>$${s.fees}</b>${s.qualified ? ` · +${EQUITY_PER_STUDIO}% equity` : ''}` : ''}</div>` : ''}</div>`).join('') || '<div class="meta">No live studios yet.</div>';
-  el.innerHTML = head + `<p class="meta" style="margin:0">For paying partners who bring in families and studios. Only you can see this page.</p>
-    <div class="panel"><div class="label">Partners and their links</div>${refs}
-      <div class="label" style="margin-top:12px">Add a partner</div>
-      <div class="two" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><input id="grName" placeholder="Name" maxlength="80"><input id="grCode" placeholder="code, e.g. alex" maxlength="30"></div>
+    <div class="meta" style="margin-top:4px">Live ${s.live ? fmtDate(s.live + 'T12:00:00') : '–'} · first booking ${s.first ? fmtDate(s.first + 'T12:00:00') : 'none yet'}${s.win.length ? ` · ${s.hits} of ${MONTHS_TO_QUALIFY} good months${s.qualified ? ' ✅' : ''}` : ''}</div>
+    ${s.win.length ? monthBoxes(s.win) : ''}</div>`).join('') || '<div class="meta">No live studios yet.</div>';
+  el.innerHTML = head + `<p class="meta" style="margin:0">Everything about the people you pay for bringing in families and studios. Only you can see this page.</p>${tiles}
+    <h3 style="margin:18px 0 6px">Partners</h3>${cards}
+    <div class="panel"><div class="label">Add a partner</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><input id="grName" placeholder="Name" maxlength="80"><input id="grCode" placeholder="code, e.g. alex" maxlength="30"></div>
       <button class="btn" data-saveref>Save partner</button>
-      <p class="meta" style="margin:8px 0 0">Codes are 3 to 30 lowercase letters, numbers or dashes. Each person's first link wins and is remembered for 30 days. Saving an existing code updates it.</p></div>
-    <div class="panel"><div class="label">Studios: completed bookings by month</div>
-      <p class="meta" style="margin:0 0 8px">A booking counts once its class date has passed. Month 1 is the month of the first booking, and green means ${MONTH_GOAL}+. * is the current month so far. ${qualified} studio${qualified === 1 ? '' : 's'} qualified${qualified ? ` = ${Math.min(10, qualified * EQUITY_PER_STUDIO).toFixed(1)}% equity (cap 10%)` : ''}. Studios with no partner are yours and earn nobody anything.</p>${stRows}</div>
+      <p class="meta" style="margin:8px 0 0">Codes are 3 to 30 lowercase letters, numbers or dashes. Each person's first link wins and is remembered for 30 days. Saving an existing code updates its name.</p></div>
+    <div class="panel"><div class="label">All studios</div>
+      <p class="meta" style="margin:0">Choose who sourced each studio. Studios with nobody chosen are yours and earn nobody anything. A booking counts once its class date has passed. Month 1 is the month of the first booking, green means ${MONTH_GOAL}+, and * is the current month so far.</p>
+      ${gdet('all-studios', `Show all ${studs.length} studio${studs.length === 1 ? '' : 's'}`, stRows, false)}</div>
     <div class="panel"><div class="label">Accounts that never count toward bonuses</div>
-      <p class="meta" style="margin:0 0 8px">Test accounts, and the family and friends of anyone being paid. Their bookings and sign-ups are left out of every number above.</p>
+      <p class="meta" style="margin:0 0 8px">Test accounts, and the family and friends of anyone being paid. Their bookings and sign-ups are left out of every number here, and out of the paying-member count.</p>
       ${G.excl.map(x => `<div class="hist"><div>${esc(x.email)}<div class="meta">${esc(x.display_name || '')}</div></div><button class="btn ghost" style="padding:6px 10px;font-size:13px" data-unexclude="${esc(x.email)}">Remove</button></div>`).join('')}
       <div style="display:flex;gap:8px;margin-top:8px"><input id="exEmail" type="email" placeholder="Account email" style="margin:0"><button class="btn" data-excludeadd>Add</button></div></div>
-    <p class="meta">"Paid 60+ days" means subscribed and paid for at least 60 days and still subscribed. Check Stripe for refunds or disputes before paying a bonus. Bonus amounts and thresholds are set at the top of the Growth code in app.js.</p>`;
+    <p class="meta">"Paid 60+ days" means subscribed and paid for at least 60 days and still subscribed. Check Stripe for refunds or disputes before paying a bonus. "Paying members" counts every active subscriber, not only a partner's. Bonus amounts, thresholds and the member equity tiers are set at the top of the Growth code in app.js and in the database.</p>`;
 }
 async function growthAction(promise, done) {
   const { error } = await promise;
@@ -2052,6 +2113,7 @@ async function savePricing() {
   await refresh(); toast('Saved. All class prices recalculated ✓');
 }
 $('#view-admin').addEventListener('input', e => { if (e.target.closest('#prCv, #prMargin, #prMax')) pricingExamples(); });
+$('#view-admin').addEventListener('toggle', e => { const k = e.target.dataset && e.target.dataset.gkey; if (k) growthOpen.set(k, e.target.open); }, true);
 $('#view-admin').addEventListener('change', e => { const s = e.target.closest('[data-studioref]'); if (s) growthAction(sb.rpc('admin_set_studio_referrer', { p_studio: s.dataset.studioref, p_code: s.value || null }), 'Saved'); });
 $('#view-admin').addEventListener('input', e => { if (e.target.id === 'peopleQ') { peopleQ = e.target.value; $('#peopleList').innerHTML = peopleRows(); } });
 
@@ -2163,6 +2225,7 @@ async function handleClick(e) {
     growthAction(sb.rpc('admin_add_partner_payment', { p_code: c, p_amount_cents: cents, p_kind: q('kind').value, p_note: q('note').value, p_paid_on: null }), 'Payment logged'); return;
   }
   if ((el = hit('[data-delpay]'))) { if (confirm('Delete this payment record?')) growthAction(sb.rpc('admin_delete_partner_payment', { p_id: el.dataset.delpay }), 'Deleted'); return; }
+  if ((el = hit('[data-saveterms]'))) { const c = el.dataset.saveterms, q = k => document.querySelector(`[data-term${k}="${c}"]`); growthAction(sb.rpc('admin_set_partner_terms', { p_code: c, p_started: q('start').value || null, p_ended: q('end').value || null, p_tiers: q('tiers').checked }), 'Terms saved'); return; }
   if (hit('[data-saveref]')) { growthAction(sb.rpc('admin_save_referrer', { p_code: $('#grCode').value, p_name: $('#grName').value, p_note: null, p_active: true }), 'Partner saved'); return; }
   if ((el = hit('[data-refmembers]'))) { showRefMembers(el.dataset.refmembers); return; }
   if (hit('[data-excludeadd]')) { growthAction(sb.rpc('admin_set_bonus_excluded', { p_email: $('#exEmail').value, p_excluded: true }), 'Account excluded'); return; }
