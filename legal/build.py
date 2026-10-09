@@ -123,7 +123,8 @@ PRIVACY = '''
 <tr><td><b>Technical</b></td><td>A sign-in token stored in your browser so you stay logged in. Standard server logs (such as IP address) from our providers.</td><td>Keep you signed in, security, fixing problems</td></tr>
 <tr><td><b>Waivers you sign</b></td><td>If a studio asks for a waiver: the exact text, its version, your typed name, the children you named, the date and time, and your browser type</td><td>Give the studio a record of your agreement</td></tr>
 <tr><td><b>Usage and error reports</b></td><td>Anonymous counts of visits and steps (such as viewing a studio or starting checkout), using a random code that lasts only while the browser tab is open. If the app crashes, the error message, the page and your browser type. No cookies, and we don't store your IP address with these.</td><td>Understand how the app is used and fix problems</td></tr>
-<tr><td><b>Your location (optional)</b></td><td>If you tap "Near me", your browser may share your location. It's used on your device to sort and show nearby classes and <b>isn't sent to or stored by us</b>.</td><td>Show nearby classes</td></tr>
+<tr><td><b>Referral links</b></td><td>If you arrive through a referral link, a referral code, saved in your browser for up to 30 days. If you sign up, it is attached to your account so we can credit whoever referred you.</td><td>Credit and pay the people and studios who bring families to LittlePass</td></tr>
+<tr><td><b>Your location (optional)</b></td><td>If you tap "Near me", your browser may share your location. It's used on your device to sort and show nearby classes and <b>isn't sent to or stored by us</b>. If you type a ZIP code instead, it is sent to OpenStreetMap's lookup service to find the area, and we don't store it.</td><td>Show nearby classes</td></tr>
 </table>
 <p>We don't collect payment card numbers, government IDs, or precise location history.</p>
 
@@ -146,14 +147,14 @@ PRIVACY = '''
 <tr><td>Stripe</td><td>Payment processing and subscription management</td></tr>
 <tr><td>Resend</td><td>Sending our emails (booking confirmations and account emails)</td></tr>
 <tr><td>Netlify</td><td>Hosting the website</td></tr>
-<tr><td>OpenStreetMap and Nominatim</td><td>Map tiles, and turning studio addresses into map positions. Your browser contacts them when you view the map.</td></tr>
+<tr><td>OpenFreeMap, OpenStreetMap and Nominatim</td><td>Map tiles and map data, and turning addresses and ZIP codes into map positions. Your browser contacts them when you view the map, so they can see your IP address, as any website would.</td></tr>
 <tr><td>Google Fonts and code libraries (cdnjs, jsDelivr)</td><td>Fonts and software the site loads. Your browser contacts them, which can share your IP address.</td></tr>
 </table>
 <p>We may also share information if the law requires it, to protect people's safety or our rights, or if our business is sold or merged (we'd tell you).</p>
 <p><b>We don't sell your personal information</b> and we don't share it for advertising across other sites.</p>
 
 <h2>5. Cookies and similar technology</h2>
-<p>We use your browser's storage only to keep you signed in, remember your language and whether you've dismissed a tip, and hold the random visit code described above (deleted when you close the tab). We don't use cookies for advertising or analytics, and we don't track you across other sites.</p>
+<p>We use your browser's storage only to keep you signed in, remember your language and whether you've dismissed a tip, hold the random visit code described above (deleted when you close the tab), and remember a referral code if you arrive through a referral link (for up to 30 days). We don't use cookies for advertising or analytics, and we don't track you across other sites.</p>
 
 <h2>6. Emails</h2>
 <p>We send transactional emails: account, booking, subscription and safety messages. We don't send marketing email unless you opt in. [DECISION: marketing emails and unsubscribe.]</p>

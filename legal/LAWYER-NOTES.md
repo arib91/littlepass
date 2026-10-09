@@ -11,7 +11,8 @@ Anything in [BRACKETS] is a placeholder or an open decision. Nothing here has be
 - **Reviews**: only attendees can review; studios can reply but not edit/delete; we can hide reported content. **Photos**: studios upload; consent checkbox ("permission from parents/guardians of any children shown"); live immediately; reportable; we can remove.
 - **Addresses**: each class's address is either public or visible only to parents who booked.
 - **Children's data** we hold: first name + birthday, entered by the parent. Studios see the attending child's first name and parent's name for their bookings.
-- **Processors**: Supabase (DB/auth/storage), Stripe, Resend (email), Netlify (hosting), OpenStreetMap/Nominatim (maps/geocoding), Google Fonts, cdnjs/jsDelivr.
+- **Processors**: Supabase (DB/auth/storage), Stripe, Resend (email), Netlify (hosting), OpenFreeMap + OpenStreetMap/Nominatim (map tiles, geocoding, ZIP lookup), Google Fonts, cdnjs/jsDelivr.
+- **Referral tracking (new):** a referral link (`?ref=code`) stores the code in the browser (localStorage, 30 days) and, if the person signs up, on their profile (`referrer_code`, `signup_source`). Only the admin can see it. Used to pay partners (see question 12). Privacy Policy updated to say so.
 
 ## Questions for the lawyer
 1. **Entity and name**: LLC formation; trademark search/clearance for "LittlePass" (similar marks: Little Passports; competitor KidPass).
@@ -27,6 +28,7 @@ Anything in [BRACKETS] is a placeholder or an open decision. Nothing here has be
 9. **Disputes**: arbitration and class-action waiver, venue, notice mechanics.
 10. **Non-circumvention** clause strength for studios.
 11. **Data retention** periods; breach-notification process; requirement for a published data-request method.
+12. **Referral / sales partners** (a person who signs studios and brings in families, paid per studio and per member, plus a small equity grant and possibly a flat monthly support fee): independent contractor vs employee in California (the ABC test and commission-based pay), written agreement terms (IP, confidentiality, no side deals or special prices, protection of children's and parents' data, 14 days' notice with earned fees still payable), how to grant the equity (profits interests, vesting, tax), and **advertising disclosure** when a paid partner promotes LittlePass (FTC endorsement rules).
 
 ## Product items to build once the lawyer decides
 - ~~In-app "delete my account" and "download my data".~~ **Built.** Deletion ends the subscription at once, cancels upcoming bookings, anonymises (does not delete) booking records and reviews, and blocks a studio from closing while it has upcoming bookings or unpaid earnings. Please review this design.

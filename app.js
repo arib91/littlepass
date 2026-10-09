@@ -90,7 +90,7 @@ let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentS
 let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
-let adminStats = null, adminUsers = [], adminAudit = [], peopleQ = '', peopleRole = 'all', myLedger = [], histAll = false, editKid = null, editName = false;
+let adminGrowth = null, adminStats = null, adminUsers = [], adminAudit = [], peopleQ = '', peopleRole = 'all', myLedger = [], histAll = false, editKid = null, editName = false;
 let adminPay = [], adminPayouts = [], adminPricing = null, adminReports = [];
 let waivers = [], mySignatures = [], ownWaivers = [], studioSignatures = [], waiverFlow = null, editWaiver = null;
 let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [], locations = [], exceptions = [], contacts = [];
@@ -224,7 +224,7 @@ async function loadPublic() {
   (ct.data || []).forEach(r => { counts[`${r.slot_id}_${r.session_date}`] = Number(r.taken); });
 }
 async function loadPrivate() {
-  kids = []; myBookings = []; myWaitlist = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null; adminReports = []; pastBookings = []; adminUsers = []; adminAudit = []; myLedger = []; adminStats = null; mySignatures = []; ownWaivers = []; studioSignatures = [];
+  kids = []; myBookings = []; myWaitlist = []; studioBookings = []; payouts = []; adminStudios = []; adminPay = []; adminPayouts = []; adminPricing = null; adminReports = []; pastBookings = []; adminUsers = []; adminAudit = []; myLedger = []; adminStats = null; adminGrowth = null; mySignatures = []; ownWaivers = []; studioSignatures = [];
   if (!user) { profile = null; return; }
   profile = (await sb.from('profiles').select('*').eq('id', user.id).single()).data;
   if (profile && profile.role === 'admin') {
@@ -439,7 +439,8 @@ async function authGo() {
     const name = $('#auName').value.trim();
     if (!name) { err.textContent = T('Please enter your name.'); btn.disabled = false; return; }
     if (!$('#auTerms').checked) { err.textContent = T('Please agree to the Terms and Privacy Policy to create an account.'); btn.disabled = false; return; }
-    res = await sb.auth.signUp({ email, password, options: { data: { name, role: authState.role, terms_version: TERMS_VERSION, terms_accepted_at: new Date().toISOString(), lang: LANG } } });
+    res = await sb.auth.signUp({ email, password, options: { data: { name, role: authState.role, terms_version: TERMS_VERSION, terms_accepted_at: new Date().toISOString(), lang: LANG, ...(storedReferral() ? { ref: storedReferral().ref, src: storedReferral().src } : {}) } } });
+    if (!res.error) { try { localStorage.removeItem(REF_KEY); } catch (e) {} }
     if (!res.error && !res.data.session) {
       openModal(`<h2>${T('Check your email 📬')}</h2><p>${T('We sent a confirmation link to {email}. Click it, then come back and log in.', { email: '<b>' + esc(email) + '</b>' })}</p><div class="actions"><button class="btn" data-close>OK</button></div>`);
       return;
@@ -601,10 +602,37 @@ const miles = (a, b) => {
   const h = Math.sin(dLa / 2) ** 2 + Math.cos(r(a[0])) * Math.cos(r(b[0])) * Math.sin(dLo / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 };
+// Base map: a soft street map (OpenFreeMap "Positron", free, no key). Its code loads only when someone opens the map.
+// If it can't load (old browser, no WebGL, blocked), we fall back to plain OpenStreetMap tiles.
+let baseLayer = null;
+const loadScript = src => new Promise((ok, fail) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = fail; document.head.appendChild(s); });
+function osmFallback() {
+  if (baseLayer) { map.removeLayer(baseLayer); baseLayer = null; }
+  baseLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' }).addTo(map);
+}
+async function addBaseMap() {
+  try {
+    if (!window.maplibregl) {
+      const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.css'; document.head.appendChild(l);
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.js');
+    }
+    if (!L.maplibreGL) await loadScript('https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js');
+    const gl = L.maplibreGL({ style: 'https://tiles.openfreemap.org/styles/positron', attributionControl: { customAttribution:
+      '<a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> &copy; <a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' } });
+    baseLayer = gl.addTo(map);
+    const m = gl.getMaplibreMap();
+    let ok = false;
+    m.once('load', () => { ok = true; });
+    m.on('error', () => { if (!ok && baseLayer === gl) osmFallback(); });
+    setTimeout(() => { if (!ok && baseLayer === gl) osmFallback(); }, 15000);
+  } catch (e) { osmFallback(); }
+}
 function showMap(list, fly) {
   if (!map) {
-    map = L.map('map').setView([32.87, -117.2], 10);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+    map = L.map('map', { minZoom: 9, maxZoom: 18, attributionControl: false }).setView([32.87, -117.2], 10);
+    L.control.attribution({ prefix: false }).addTo(map);
+    addBaseMap();
     map.on('popupopen', ev => ev.popup.getElement().addEventListener('click', handleClick));
   }
   markers.forEach(m => m.remove()); markers = [];
@@ -613,7 +641,7 @@ function showMap(list, fly) {
   shown.forEach(p => {
     const mine = list.filter(s => s.studio === p.studio && s.hood === p.hood && sessKey(s) === p.key).sort((a, b) => a.date - b.date);
     const c = CATS[filters.cat !== 'all' ? filters.cat : mine[0].cat];
-    const icon = L.divIcon({ className: '', iconSize: [38, 38], iconAnchor: [19, 38], popupAnchor: [0, -36],
+    const icon = L.divIcon({ className: '', iconSize: [34, 34], iconAnchor: [17, 34], popupAnchor: [0, -32],
       html: `<div class="pin" style="background:${c.color}"><span>${c.emoji}</span></div>` });
     const away = userPos ? ` · ${T('{d} mi away', { d: miles(userPos, p.pos).toFixed(1) })}` : '';
     const html = `<div class="mappop"><h3><a class="lnk" data-studio="${esc(p.studio)}">${esc(p.studio)}</a></h3>
@@ -642,14 +670,43 @@ $('#seg').onclick = e => {
   document.querySelectorAll('#seg button').forEach(x => x.classList.toggle('on', x === b));
   renderResults();
 };
-$('#nearBtn').onclick = () => {
-  if (!navigator.geolocation) return toast(T('Location is not available in this browser'));
+// Browsers only show the "Allow location?" prompt once; if it was refused (or the app runs inside another app), there is no prompt to tap.
+// So we explain how to turn it on, and let people type a ZIP code instead.
+function locationHelp(why) {
+  openModal(`<h2>${T('Turn on location 📍')}</h2><p>${why}</p>
+    <div class="meta" style="margin:10px 0 4px"><b>${T('iPhone (Safari):')}</b> ${T('Settings → Privacy & Security → Location Services → Safari Websites → While Using the App.')}</div>
+    <div class="meta" style="margin:0 0 4px"><b>${T('Android (Chrome):')}</b> ${T('Tap the lock icon next to the address, then Permissions → Location → Allow.')}</div>
+    <div class="meta"><b>${T('Mac or PC:')}</b> ${T('Click the icon at the left of the address bar, set Location to Allow, then reload the page.')}</div>
+    <div class="label" style="margin-top:14px">${T('Or type your ZIP code')}</div>
+    <div style="display:flex;gap:8px"><input id="zipIn" inputmode="numeric" maxlength="5" placeholder="92130" autocomplete="postal-code" style="margin:0"><button class="btn" data-usezip>${T('Use ZIP')}</button></div>
+    <div class="actions"><button class="btn ghost" data-close>${T('Close')}</button></div>`);
+}
+function showNear(here) {
+  if (Math.min(...PARTNERS.map(p => miles(here, p.pos))) > 60) { toast(T("You're outside San Diego. Showing all partners.")); return; }
+  userPos = here; showMap(SESSIONS.filter(s => matches(s)), true);
+}
+async function useZip() {
+  const z = ($('#zipIn').value || '').trim();
+  if (!/^\d{5}$/.test(z)) return toast(T('Enter a 5-digit ZIP code.'));
+  try {
+    const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&postalcode=' + z);
+    const j = await r.json();
+    if (!j.length) return toast(T("We couldn't find that ZIP code."));
+    closeModal(); showNear([+j[0].lat, +j[0].lon]);
+  } catch (e) { toast(T("Couldn't look that up. Try again.")); }
+}
+$('#nearBtn').onclick = async () => {
+  if (!navigator.geolocation) return locationHelp(T('Location is not available in this browser'));
+  try {
+    const st = navigator.permissions && await navigator.permissions.query({ name: 'geolocation' });
+    if (st && st.state === 'denied') return locationHelp(T('Location is blocked for this site. Allow it in your browser settings, or use your ZIP code.'));
+  } catch (e) {}
   toast(T('Finding you…'));
-  navigator.geolocation.getCurrentPosition(pos => {
-    const here = [pos.coords.latitude, pos.coords.longitude];
-    if (Math.min(...PARTNERS.map(p => miles(here, p.pos))) > 60) { toast(T("You're outside San Diego. Showing all partners.")); return; }
-    userPos = here; showMap(SESSIONS.filter(s => matches(s)), true);
-  }, () => toast(T("Couldn't get your location. Allow location access and try again.")), { timeout: 8000 });
+  navigator.geolocation.getCurrentPosition(pos => showNear([pos.coords.latitude, pos.coords.longitude]), err => {
+    locationHelp(err.code === 1 ? T('Location is blocked for this site. Allow it in your browser settings, or use your ZIP code.')
+      : err.code === 2 ? T("Your device couldn't find your location. Check that Location Services is on for your browser, or use your ZIP code.")
+      : T('Finding you took too long. Try again, or use your ZIP code.'));
+  }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 });
 };
 
 // ---------- Class details ----------
@@ -685,7 +742,7 @@ function showStudio(name, fromHash) {
 }
 // Links from emails open a specific screen: #explore, #bookings, #plans, #family, #owner/<tab>, #admin/<tab>
 const OWNER_TABS = ['overview', 'classes', 'bookings', 'page', 'earnings', 'account'];
-const ADMIN_TABS = ['stats', 'studios', 'people', 'payouts', 'pricing', 'reports', 'account'];
+const ADMIN_TABS = ['stats', 'studios', 'people', 'payouts', 'pricing', 'growth', 'reports', 'account'];
 let pendingRoute = null;
 function routeFromHash() {
   const h = decodeURIComponent(location.hash.slice(1));
@@ -1596,6 +1653,8 @@ function renderAdmin() {
     el.innerHTML = `<h2 style="margin:24px 0 4px">Account</h2><div class="panel"><div class="label">Admin login</div><div class="meta" style="margin-bottom:12px">${esc(user.email)}</div><button class="btn ghost" data-logout>Log out</button></div>
       <div class="panel"><div class="label">Pricing</div><div class="meta" style="margin-bottom:8px">Credit value, your margin, the most a class can cost and the cancellation window.</div>
         <button class="btn ghost" data-goto="a-pricing">🧮 Pricing settings</button></div>
+      <div class="panel"><div class="label">Growth</div><div class="meta" style="margin-bottom:8px">Referral links, families and studios brought in by partners, and who has earned a bonus.</div>
+        <button class="btn ghost" data-goto="a-growth">🤝 Growth and partners</button></div>
       <div class="panel"><div class="label">Download as a spreadsheet (CSV)</div>
         <div class="meta" style="margin-bottom:8px">Opens in Excel, Numbers or Google Sheets. Handy for your accountant.</div>
         <div style="display:flex;flex-wrap:wrap;gap:8px">${[['people', 'People'], ['bookings', 'All bookings'], ['payouts', 'Payouts'], ['credits', 'Credit history'], ['activity', 'Admin activity']]
@@ -1611,6 +1670,7 @@ function renderAdmin() {
   if (adminTab === 'payouts') return renderAdminPayouts(el);
   if (adminTab === 'pricing') return renderAdminPricing(el);
   if (adminTab === 'reports') return renderAdminReports(el);
+  if (adminTab === 'growth') return renderAdminGrowth(el);
   const n = st => adminStudios.filter(s => s.status === st).length;
   const list = adminStudios.filter(s => adminFilter === 'all' || s.status === adminFilter);
   el.innerHTML = `<h2 style="margin:24px 0 4px">Studios</h2>
@@ -1656,6 +1716,102 @@ function renderAdminStats(el) {
       <div class="hist"><div>Emails that failed to send</div><b class="${S.failed_emails_7d ? 'low' : 'plus'}">${S.failed_emails_7d}</b></div>
       ${S.recent_errors.map(e => `<div class="meta" style="padding:6px 0;border-top:1px solid var(--line)"><b>${esc(e.message)}</b><br>${e.n}× · last ${fmtDate(e.last_seen)} · ${esc(e.page || '')}</div>`).join('')}
       <p class="meta" style="margin:8px 0 0">You also get a summary email every morning around 8am.</p></div>`;
+}
+
+// ----- Admin: growth (referral partners and studio bonuses) -----
+// The pay rules live here. If the agreement changes, change these numbers.
+const REF_RATE = { referral: 10, ad: 5, studio: 5 };        // $ per family that has paid for 60+ days, by how they arrived
+const SRC_LABEL = { referral: 'Own outreach', ad: 'Paid ads', studio: 'Studio flyers and emails' };
+const FEE = { live: 100, first: 100, month: 100 };           // $ per studio: classes live, first booking, each month with 30+ bookings (3 at most)
+const MONTH_GOAL = 30, MONTHS_TO_QUALIFY = 3, WINDOW = 6;    // 30+ completed bookings in a month, in 3 of the studio's first 6 months
+const EQUITY_PER_STUDIO = 0.1;                               // % of the company for each studio that qualifies (cap 10%)
+// months: [{ month: 'YYYY-MM-01', n }], first: 'YYYY-MM-DD' | null, today: 'YYYY-MM-DD'. Month 1 is the month of the first booking.
+function studioProgress(months, first, today) {
+  if (!first) return { win: [], hits: 0, qualified: false };
+  const by = Object.fromEntries(months.map(m => [String(m.month).slice(0, 7), +m.n]));
+  const [y, m] = first.split('-').map(Number), now = today.slice(0, 7), win = [];
+  for (let i = 0; i < WINDOW; i++) {
+    const key = new Date(Date.UTC(y, m - 1 + i, 1)).toISOString().slice(0, 7), n = by[key] || 0;
+    win.push({ key, n, hit: n >= MONTH_GOAL, future: key > now, current: key === now });
+  }
+  const hits = win.filter(w => w.hit).length;
+  return { win, hits, qualified: hits >= MONTHS_TO_QUALIFY };
+}
+function growthStudios(rows, today) {
+  const by = new Map();
+  rows.forEach(r => {
+    if (!by.has(r.studio_id)) by.set(r.studio_id, { id: r.studio_id, name: r.studio_name, code: r.referrer_code, live: r.went_live, first: r.first_booking, months: [] });
+    if (r.month) by.get(r.studio_id).months.push({ month: r.month, n: +r.bookings });
+  });
+  return [...by.values()].map(s => {
+    const p = studioProgress(s.months, s.first, today);
+    return { ...s, ...p, fees: s.code ? (s.live ? FEE.live : 0) + (s.first ? FEE.first : 0) + Math.min(p.hits, MONTHS_TO_QUALIFY) * FEE.month : 0 };
+  });
+}
+function growthMembers(rep) {
+  const by = {};
+  rep.forEach(r => {
+    const c = by[r.code] = by[r.code] || { signups: 0, paid: 0, qualified: 0, earned: 0 };
+    c.signups += +r.signups; c.paid += +r.subscribed; c.qualified += +r.qualified; c.earned += +r.qualified * (REF_RATE[r.source] || 0);
+  });
+  return by;
+}
+async function loadAdminGrowth() {
+  const rs = await Promise.all([sb.rpc('admin_list_referrers'), sb.rpc('admin_referral_report'), sb.rpc('admin_studio_months'), sb.rpc('admin_excluded_accounts')]);
+  const bad = rs.find(r => r.error);
+  adminGrowth = bad ? { error: bad.error.message } : { refs: rs[0].data, rep: rs[1].data, studs: rs[2].data, excl: rs[3].data };
+  if (currentView === 'admin' && adminTab === 'growth') renderAdmin();
+}
+function renderAdminGrowth(el) {
+  const head = '<div style="display:flex;justify-content:space-between;align-items:center;margin:24px 0 4px"><h2 style="margin:0">Growth</h2><button class="btn ghost" data-refreshgrowth>↻ Refresh</button></div>';
+  if (!adminGrowth) { el.innerHTML = head + '<div class="empty">Loading… 🤝</div>'; loadAdminGrowth(); return; }
+  if (adminGrowth.error) { el.innerHTML = head + `<div class="panel"><b>Couldn't load this.</b><div class="meta">${esc(adminGrowth.error)}</div><div class="meta" style="margin-top:6px">If it mentions a missing function or table, run <b>supabase/025_referrals.sql</b> in the Supabase SQL Editor first.</div></div>`; return; }
+  const G = adminGrowth, today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const base = location.origin + location.pathname, mem = growthMembers(G.rep), studs = growthStudios(G.studs, today);
+  const copy = (label, url) => `<div class="hist"><div><div>${label}</div><div class="meta" style="word-break:break-all">${esc(url)}</div></div><button class="btn ghost" style="padding:6px 10px;font-size:13px" data-copylink="${esc(url)}">Copy</button></div>`;
+  const refs = G.refs.map(r => {
+    const m = mem[r.code] || { signups: 0, paid: 0, qualified: 0, earned: 0 }, mine = studs.filter(s => s.code === r.code);
+    return `<div class="panel"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><div><b>${esc(r.name)}</b> <span class="tag">${esc(r.code)}</span>${r.active ? '' : ' <span class="tag">paused</span>'}</div>
+        <button class="btn ghost" style="padding:6px 10px;font-size:13px" data-refmembers="${esc(r.code)}">See families</button></div>
+      <div class="meta" style="margin:6px 0">${m.signups} signed up · ${m.paid} have paid · <b>${m.qualified}</b> paid 60+ days = <b>$${m.earned}</b> earned · ${mine.length} studio${mine.length === 1 ? '' : 's'} sourced</div>
+      ${copy('Families, own outreach ($' + REF_RATE.referral + ' each)', `${base}?ref=${r.code}`)}
+      ${copy('Families from paid ads ($' + REF_RATE.ad + ' each)', `${base}?ref=${r.code}&src=ad`)}
+      ${copy('Families from studio flyers and emails ($' + REF_RATE.studio + ' each)', `${base}?ref=${r.code}&src=studio`)}
+      ${copy('Studios to sign up', `${base}?ref=${r.code}#join-studio`)}</div>`;
+  }).join('') || '<div class="meta">No partners yet. Add one below.</div>';
+  const qualified = studs.filter(s => s.code && s.qualified).length;
+  const stRows = studs.map(s => `<div class="panel"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b>${esc(s.name)}</b>
+      <select data-studioref="${esc(s.id)}" style="margin:0;max-width:200px"><option value="">Sourced by: nobody (ours)</option>${G.refs.map(r => `<option value="${esc(r.code)}" ${s.code === r.code ? 'selected' : ''}>Sourced by: ${esc(r.name)}</option>`).join('')}</select></div>
+    <div class="meta" style="margin-top:4px">Live ${s.live ? fmtDate(s.live) : '–'} · first booking ${s.first ? fmtDate(s.first) : 'none yet'}</div>
+    ${s.win.length ? `<div style="margin-top:6px">${s.win.map(w => `<span title="${w.key}" style="display:inline-block;min-width:36px;text-align:center;padding:3px 6px;border-radius:8px;margin:2px 4px 2px 0;font-weight:700;background:${w.hit ? '#d8f1e3' : '#f3efe9'};${w.future ? 'opacity:.45' : ''}">${w.n}${w.current ? '*' : ''}</span>`).join('')}</div>
+      <div class="meta" style="margin-top:4px"><b>${s.hits} of ${MONTHS_TO_QUALIFY}</b> months with ${MONTH_GOAL}+ bookings${s.qualified ? ' ✅ qualified' : ''}${s.code ? ` · fees earned <b>$${s.fees}</b>${s.qualified ? ` · +${EQUITY_PER_STUDIO}% equity` : ''}` : ''}</div>` : ''}</div>`).join('') || '<div class="meta">No live studios yet.</div>';
+  el.innerHTML = head + `<p class="meta" style="margin:0">For paying partners who bring in families and studios. Only you can see this page.</p>
+    <div class="panel"><div class="label">Partners and their links</div>${refs}
+      <div class="label" style="margin-top:12px">Add a partner</div>
+      <div class="two" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><input id="grName" placeholder="Name" maxlength="80"><input id="grCode" placeholder="code, e.g. alex" maxlength="30"></div>
+      <button class="btn" data-saveref>Save partner</button>
+      <p class="meta" style="margin:8px 0 0">Codes are 3 to 30 lowercase letters, numbers or dashes. Each person's first link wins and is remembered for 30 days. Saving an existing code updates it.</p></div>
+    <div class="panel"><div class="label">Studios: completed bookings by month</div>
+      <p class="meta" style="margin:0 0 8px">A booking counts once its class date has passed. Month 1 is the month of the first booking, and green means ${MONTH_GOAL}+. * is the current month so far. ${qualified} studio${qualified === 1 ? '' : 's'} qualified${qualified ? ` = ${Math.min(10, qualified * EQUITY_PER_STUDIO).toFixed(1)}% equity (cap 10%)` : ''}. Studios with no partner are yours and earn nobody anything.</p>${stRows}</div>
+    <div class="panel"><div class="label">Accounts that never count toward bonuses</div>
+      <p class="meta" style="margin:0 0 8px">Test accounts, and the family and friends of anyone being paid. Their bookings and sign-ups are left out of every number above.</p>
+      ${G.excl.map(x => `<div class="hist"><div>${esc(x.email)}<div class="meta">${esc(x.display_name || '')}</div></div><button class="btn ghost" style="padding:6px 10px;font-size:13px" data-unexclude="${esc(x.email)}">Remove</button></div>`).join('')}
+      <div style="display:flex;gap:8px;margin-top:8px"><input id="exEmail" type="email" placeholder="Account email" style="margin:0"><button class="btn" data-excludeadd>Add</button></div></div>
+    <p class="meta">"Paid 60+ days" means subscribed and paid for at least 60 days and still subscribed. Check Stripe for refunds or disputes before paying a bonus. Bonus amounts and thresholds are set at the top of the Growth code in app.js.</p>`;
+}
+async function growthAction(promise, done) {
+  const { error } = await promise;
+  if (error) { toast(error.message); return; }
+  if (done) toast(done);
+  loadAdminGrowth();
+}
+async function showRefMembers(code) {
+  const { data, error } = await sb.rpc('admin_referral_members', { p_code: code });
+  if (error) { toast(error.message); return; }
+  openModal(`<h2>Families: ${esc(code)}</h2>${data.length ? data.map(m => `<div class="hist"><div><b>${esc(m.display_name || '(no name)')}</b> <span class="tag">${esc(SRC_LABEL[m.source] || m.source || '')}</span>
+      <div class="meta">${esc(m.email)} · joined ${fmtDate(m.joined)}<br>${m.plan ? esc(m.plan) + ' (' + esc(m.plan_status || '') + ')' : 'No plan'}${m.first_paid ? ' · first paid ' + fmtDate(m.first_paid) : ' · not paid yet'}</div></div>
+      <b>${m.qualified ? '✅ $' + (REF_RATE[m.source] || 0) : '–'}</b></div>`).join('') : '<p class="meta">Nobody yet.</p>'}
+    <div class="actions"><button class="btn ghost" data-close>Close</button></div>`);
 }
 
 // ----- Admin: people -----
@@ -1841,6 +1997,7 @@ async function savePricing() {
   await refresh(); toast('Saved. All class prices recalculated ✓');
 }
 $('#view-admin').addEventListener('input', e => { if (e.target.closest('#prCv, #prMargin, #prMax')) pricingExamples(); });
+$('#view-admin').addEventListener('change', e => { const s = e.target.closest('[data-studioref]'); if (s) growthAction(sb.rpc('admin_set_studio_referrer', { p_studio: s.dataset.studioref, p_code: s.value || null }), 'Saved'); });
 $('#view-admin').addEventListener('input', e => { if (e.target.id === 'peopleQ') { peopleQ = e.target.value; $('#peopleList').innerHTML = peopleRows(); } });
 
 // ----- Admin: reports -----
@@ -1922,6 +2079,7 @@ async function handleClick(e) {
   if ((el = hit('[data-authrole]'))) { openAuth('signup', authState.reason, el.dataset.authrole); return; }
   if (hit('[data-authgo]')) { authGo(); return; }
   if (hit('[data-forgot]')) { forgotPassword(); return; }
+  if (hit('[data-usezip]')) { useZip(); return; }
   if (hit('[data-setpass]')) { setNewPassword(); return; }
   if ((el = hit('[data-mkpayout]'))) { makePayout(el.dataset.mkpayout); return; }
   if ((el = hit('[data-markpaid]'))) { markPaid(el.dataset.markpaid); return; }
@@ -1940,6 +2098,12 @@ async function handleClick(e) {
   if ((el = hit('[data-goto]'))) { showTab(el.dataset.goto); return; }
   if ((el = hit('[data-bkf]'))) { bkFilter = el.dataset.bkf; renderOwner(); return; }
   if (hit('[data-refreshstats]')) { adminStats = null; renderAdmin(); return; }
+  if (hit('[data-refreshgrowth]')) { adminGrowth = null; renderAdmin(); return; }
+  if ((el = hit('[data-copylink]'))) { try { await navigator.clipboard.writeText(el.dataset.copylink); toast('Link copied'); } catch (e) { toast('Copy failed. Select the link and copy it by hand.'); } return; }
+  if (hit('[data-saveref]')) { growthAction(sb.rpc('admin_save_referrer', { p_code: $('#grCode').value, p_name: $('#grName').value, p_note: null, p_active: true }), 'Partner saved'); return; }
+  if ((el = hit('[data-refmembers]'))) { showRefMembers(el.dataset.refmembers); return; }
+  if (hit('[data-excludeadd]')) { growthAction(sb.rpc('admin_set_bonus_excluded', { p_email: $('#exEmail').value, p_excluded: true }), 'Account excluded'); return; }
+  if ((el = hit('[data-unexclude]'))) { growthAction(sb.rpc('admin_set_bonus_excluded', { p_email: el.dataset.unexclude, p_excluded: false }), 'Account counts again'); return; }
   if ((el = hit('[data-peoplerole]'))) { peopleRole = el.dataset.peoplerole; renderAdmin(); return; }
   if ((el = hit('[data-adjust]'))) { adjustCredits(el.dataset.adjust); return; }
   if ((el = hit('[data-arefund]'))) { adminRefund(el.dataset.arefund, el.dataset.personId); return; }
@@ -2143,7 +2307,25 @@ function maybeShowInstallTip() {
 $('#installClose').onclick = () => { $('#installTip').classList.remove('show'); try { localStorage.setItem('lp-install-tip', '1'); } catch (e) {} };
 maybeShowInstallTip();
 
+// ---------- Referral links ----------
+// A link like littlepass.netlify.app/?ref=code (optionally &src=ad or &src=studio) is remembered in this browser for 30 days
+// and attached to the account if the person signs up, so we can credit whoever brought them. First link wins.
+const REF_KEY = 'lp_ref';
+function storedReferral() {
+  try { const r = JSON.parse(localStorage.getItem(REF_KEY) || 'null'); return r && Date.now() - r.t <= 30 * 864e5 ? r : null; } catch (e) { return null; }
+}
+function captureReferral() {
+  try {
+    const q = new URLSearchParams(location.search), ref = (q.get('ref') || '').toLowerCase();
+    if (!/^[a-z0-9-]{3,30}$/.test(ref)) return;
+    if (!storedReferral()) localStorage.setItem(REF_KEY, JSON.stringify({ ref, src: ['ad', 'studio'].includes(q.get('src')) ? q.get('src') : 'referral', t: Date.now() }));
+    q.delete('ref'); q.delete('src');
+    history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash);
+  } catch (e) {}
+}
+
 // ---------- Start ----------
+captureReferral();
 applyStatic();
 renderAll();
 (async () => {
