@@ -181,8 +181,18 @@ function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2600);
 }
-function openModal(html) { $('#modal').innerHTML = html; $('#modalBg').classList.add('show'); }
-function closeModal() { $('#modalBg').classList.remove('show'); }
+let modalReturnFocus = null;
+function openModal(html) {
+  if (!$('#modalBg').classList.contains('show')) modalReturnFocus = document.activeElement;
+  $('#modal').innerHTML = html; $('#modalBg').classList.add('show');
+  const h = $('#modal h2'); if (h) { h.id = 'modalTitle'; $('#modal').setAttribute('aria-labelledby', 'modalTitle'); } else $('#modal').removeAttribute('aria-labelledby');
+}
+function closeModal() {
+  $('#modalBg').classList.remove('show');
+  if (modalReturnFocus && document.contains(modalReturnFocus)) modalReturnFocus.focus();
+  modalReturnFocus = null;
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#modalBg').classList.contains('show')) closeModal(); });
 $('#modalBg').onclick = e => { if (e.target.id === 'modalBg' || e.target.dataset.close !== undefined) closeModal(); };
 
 // ---------- Data ----------
@@ -446,11 +456,11 @@ $('#modal').addEventListener('keydown', e => { if (e.key === 'Enter' && $('[data
 // ---------- Filters UI ----------
 function renderFilters() {
   $('#ageChips').innerHTML = AGES.map(a =>
-    `<button class="chip ${filters.age === a.id ? 'on' : ''}" data-age="${a.id}">${T(a.label)}</button>`).join('')
+    `<button class="chip ${filters.age === a.id ? 'on' : ''}" aria-pressed="${filters.age === a.id}" data-age="${a.id}">${T(a.label)}</button>`).join('')
     + kids.map((k, i) =>
-    `<button class="chip ${filters.age === 'kid' + i ? 'on' : ''}" data-age="kid${i}">👶 ${esc(k.name)}</button>`).join('');
+    `<button class="chip ${filters.age === 'kid' + i ? 'on' : ''}" aria-pressed="${filters.age === 'kid' + i}" data-age="kid${i}">👶 ${esc(k.name)}</button>`).join('');
   $('#catChips').innerHTML = Object.entries(CATS).map(([id, c]) =>
-    `<button class="chip ${filters.cat === id ? 'on' : ''}" data-cat="${id}">${c.emoji} ${T(c.label)}</button>`).join('');
+    `<button class="chip ${filters.cat === id ? 'on' : ''}" aria-pressed="${filters.cat === id}" data-cat="${id}">${c.emoji} ${T(c.label)}</button>`).join('');
   const studioNames = [...new Set(SESSIONS.map(s => s.studio))].sort((a, b) => a.localeCompare(b));
   const classTitles = [...new Set(SESSIONS.filter(s => filters.studio === 'all' || s.studio === filters.studio).map(s => s.title))].sort((a, b) => a.localeCompare(b));
   if (filters.studio !== 'all' && !studioNames.includes(filters.studio)) filters.studio = 'all';
@@ -516,7 +526,6 @@ $('#showResults').onclick = () => {
   const target = exploreMode === 'map' ? $('#mapWrap') : $('#results');
   target.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
-if (window.innerWidth >= 760) setFilterPanel(true);   // roomy screens: filters start open
 const filtersActive = () => filters.age !== 'all' || filters.cat !== 'all' || filters.hood !== HOODS[0] || filters.day !== 'all'
   || filters.studio !== 'all' || filters.cls !== 'all' || !!filters.q.trim();
 function clearFilters() {
@@ -553,7 +562,7 @@ function card(s, mode) {
     <div class="emoji" style="background:${c.color}">${c.emoji}</div>
     <div>
       <h3>${esc(s.title)}</h3>
-      <div class="meta"><a class="lnk" data-studio="${esc(s.studio)}">${esc(s.studio)}</a><br>📍 ${esc(s.hood)} · 🕘 ${mode === 'booking' ? dayName(s.date) + ', ' : ''}${s.time}${s.mins ? ` (${s.mins} min)` : ''}${s.loc ? (mode === 'booking' ? `<br>🧭 ${esc(s.loc.address)}<br>${dirLinks(s.loc)}` : ` · <a class="lnk" href="${gmaps(s.loc)}" target="_blank" rel="noopener">${T('Directions')}</a>`) : ''}</div>
+      <div class="meta"><a class="lnk" data-studio="${esc(s.studio)}">${esc(s.studio)}</a><br>📍 ${esc(s.hood)} · 🕘 ${mode === 'booking' ? dayName(s.date) + ', ' : ''}<span class="nw">${s.time}${s.mins ? ` (${s.mins} min)` : ''}</span>${s.loc ? (mode === 'booking' ? `<br>🧭 ${esc(s.loc.address)}<br>${dirLinks(s.loc)}` : ` · <a class="lnk" href="${gmaps(s.loc)}" target="_blank" rel="noopener">${T('Directions')}</a>`) : ''}</div>
       <div class="tags">
         ${bk ? `<span class="tag">👶 ${esc(bk.attendee_name)}</span>` : ''}${wl ? `<span class="tag low">${T('⏳ Waitlist #{n}', { n: wl.place })} · ${esc(wl.attendee_name)}</span>` : ''}
         ${s.ageMax && mode !== 'booking' ? `<span class="tag">👶 ${ageText(s.ageMin, s.ageMax)}</span>` : ''}
@@ -564,7 +573,7 @@ function card(s, mode) {
       </div>
       ${mode === 'booking' ? contactBlock(s.studioId) : ''}
     </div>
-    <div class="right"><div class="cost">⭐ ${s.credits}</div>${action}</div>
+    <div class="right"><div class="cost">⭐ ${s.credits} <small>${T(s.credits === 1 ? 'credit' : 'credits')}</small></div>${action}</div>
   </div>`;
 }
 
@@ -607,7 +616,7 @@ function showMap(list, fly) {
     const icon = L.divIcon({ className: '', iconSize: [38, 38], iconAnchor: [19, 38], popupAnchor: [0, -36],
       html: `<div class="pin" style="background:${c.color}"><span>${c.emoji}</span></div>` });
     const away = userPos ? ` · ${T('{d} mi away', { d: miles(userPos, p.pos).toFixed(1) })}` : '';
-    const html = `<div class="pop"><h3><a class="lnk" data-studio="${esc(p.studio)}">${esc(p.studio)}</a></h3>
+    const html = `<div class="mappop"><h3><a class="lnk" data-studio="${esc(p.studio)}">${esc(p.studio)}</a></h3>
       <div class="meta">📍 ${p.loc ? esc(p.loc.address) : p.hood}${away}</div>${p.loc ? `<div class="meta">🧭 ${dirLinks(p.loc)}</div>` : ''}<div style="margin-top:8px">${mine.slice(0, 3).map(s => `<div class="cls"><div><b>${esc(s.title)}</b><br>${dayName(s.date)} · ${s.time}</div>
       ${sessBtn(s, 'style="padding:6px 10px;font-size:13px"') || `<button class="btn" data-book="${s.id}">⭐ ${s.credits} · ${T('Book')}</button>`}</div>`).join('')}</div>
       ${mine.length > 3 ? `<div class="meta" style="margin-top:6px">${T('+ {n} more', { n: mine.length - 3 })} · <a class="lnk" data-studio="${esc(p.studio)}">${T('see all')}</a></div>` : ''}</div>`;
@@ -659,7 +668,7 @@ function openDetails(classId) {
     ${loc ? `<p style="margin:6px 0">🧭 ${esc(loc.address)}<br>${dirLinks(loc)}</p>` : c.has_address ? `<p class="meta" style="margin:6px 0">${T('🔒 The exact address is shared once you book.')}</p>` : ''}
     ${waiverNote(c.id)}
     <div class="label" style="margin-top:12px">${T('Next sessions')}</div>
-    ${next.length ? next.map(s => `<div class="cls" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)"><div><b>${dayName(s.date)}</b><div class="meta">${s.time} · ${s.mins} min · ⭐ ${s.credits}</div></div>
+    ${next.length ? next.map(s => `<div class="cls" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)"><div><b>${dayName(s.date)}</b><div class="meta">${s.time} · ${s.mins} min · ${T('⭐ {n} credits', { n: s.credits })}</div></div>
       <div style="margin-left:auto">${sessBtn(s, 'style="padding:6px 12px"') || `<button class="btn" style="padding:6px 12px" data-book="${s.id}">${T('Book')}</button>`}</div></div>`).join('') : `<p class="meta">${T('No upcoming sessions.')}</p>`}
     <div class="actions"><button class="btn ghost" data-close>${T('Close')}</button></div>`);
 }
@@ -893,7 +902,7 @@ function pastCard(b) {
       <div class="meta">${st ? `<a class="lnk" data-studio="${esc(st.name)}">${esc(st.name)}</a><br>` : ''}🗓 ${date} · ${t12(b.session_time)}</div>
       <div class="tags"><span class="tag">👶 ${esc(b.attendee_name)}</span>${rv ? `<span class="tag paid">${T('✓ Reviewed')} ${starStr(rv.stars)}</span>` : ''}</div>
     </div>
-    <div class="right"><div class="cost">⭐ ${b.credits}</div>
+    <div class="right"><div class="cost">⭐ ${b.credits} <small>${T(b.credits === 1 ? 'credit' : 'credits')}</small></div>
       ${st && c ? `<button class="btn ${rv ? 'ghost' : ''}" data-goreview="${esc(st.name)}" data-cid="${c.id}">${rv ? T('Edit review') : T('Review')}</button>` : ''}</div></div>`;
 }
 function renderBookings() {
@@ -1966,7 +1975,7 @@ async function handleClick(e) {
   }
   if ((el = hit('[data-book]'))) {
     if (map) map.closePopup();
-    if (!user) return openAuth('login', T('Log in or sign up to book classes. New accounts start with 10 free credits.'));
+    if (!user) return openAuth('signup', T('Log in or sign up to book classes. New accounts start with 10 free credits.'), 'parent');
     if (profile && profile.role !== 'parent') return toast(T('Only parent accounts can book classes.'));
     const s = SESSIONS.find(x => x.id === el.dataset.book), credits = profile ? profile.credits : 0, enough = credits >= s.credits;
     const late = new Date(`${s.dateStr}T${s.time24}`) - Date.now() < cancelHours * 36e5;

@@ -32,6 +32,8 @@ const ES = {
   "Family": "Familia",
   "Log in": "Entrar",
   "⭐ {n} credits": "⭐ {n} créditos",
+  "credit": "crédito",
+  "credits": "créditos",
   "All ages": "Todas las edades",
   "0–6 mo": "0–6 meses",
   "6–12 mo": "6–12 meses",

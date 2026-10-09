@@ -33,10 +33,11 @@
     --bg: #fffaf5;
     --card: #ffffff;
     --ink: #2d2a32;
-    --muted: #7a7483;
+    --muted: #6b6574;
     --line: #efe7df;
     --brand: #ff7a59;
-    --brand-dark: #e8603f;
+    --brand-fill: #cc4a28;   /* white text on this passes WCAG AA; --brand stays for decoration */
+    --brand-dark: #b03e20;
     --sea: #2bb3c0;
     --sun: #ffc857;
     --leaf: #7bc47f;
@@ -63,7 +64,7 @@
   .logo { margin-right: auto; }
   .ownertxt { margin-left: 4px; }
   @media (max-width: 420px) { .ownertxt { display: none; } .bar { gap: 8px; } }
-  .langbtn { background: none; border: 1.5px solid var(--line); border-radius: 999px; padding: 6px 9px; font-weight: 800; font-size: 12px; color: var(--muted); }
+  .langbtn { background: none; border: 1.5px solid var(--line); border-radius: 999px; padding: 6px 9px; min-height: 36px; min-width: 36px; font-weight: 800; font-size: 12px; color: var(--muted); }
   .credits {
     background: var(--ink); color: #fff; border: 0;
     border-radius: 999px; padding: 8px 14px; font-weight: 700; white-space: nowrap;
@@ -88,7 +89,7 @@
     color: var(--muted); font-weight: 700; font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 2px;
   }
   nav.tabs button .ico { font-size: 22px; }
-  nav.tabs button.active { color: var(--brand); }
+  nav.tabs button.active { color: var(--brand-fill); }
 
   /* Filters */
   .filters { display: grid; gap: 12px; margin-bottom: 16px; }
@@ -99,7 +100,7 @@
     flex: none; border: 1.5px solid var(--line); background: #fff; color: var(--ink);
     border-radius: 999px; padding: 7px 14px; font-weight: 700; font-size: 14px;
   }
-  .chip.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .chip.on { background: var(--brand-fill); border-color: var(--brand-fill); color: #fff; }
   select {
     font: inherit; font-weight: 700; padding: 9px 12px; border-radius: 12px;
     border: 1.5px solid var(--line); background: #fff; color: var(--ink); width: 100%;
@@ -112,7 +113,7 @@
 
   /* Class cards */
   .day-h { margin: 22px 0 10px; font-size: 18px; }
-  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
   .card {
     background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
     padding: 16px; display: flex; gap: 14px; align-items: flex-start;
@@ -125,9 +126,11 @@
   .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .tag { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: #f5efe9; }
   .card .right { margin-left: auto; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-  .cost { font-weight: 800; font-size: 14px; white-space: nowrap; }
+  .cost { font-weight: 800; font-size: 14px; white-space: nowrap; text-align: center; }
+  .cost small { display: block; font-size: 11px; font-weight: 700; color: var(--muted); }
+  .nw { white-space: nowrap; }
   .btn {
-    background: var(--brand); color: #fff; border: 0; border-radius: 12px;
+    background: var(--brand-fill); color: #fff; border: 0; border-radius: 12px;
     padding: 8px 14px; font-weight: 800; white-space: nowrap;
   }
   .btn:hover { background: var(--brand-dark); }
@@ -140,7 +143,7 @@
   .plans { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 16px; }
   .plan { background: #fff; border: 2px solid var(--line); border-radius: 22px; padding: 22px; position: relative; }
   .plan.pop { border-color: var(--brand); }
-  .plan .badge { position: absolute; top: -12px; left: 20px; background: var(--brand); color: #fff; font-size: 12px; font-weight: 800; padding: 3px 10px; border-radius: 999px; }
+  .plan .badge { position: absolute; top: -12px; left: 20px; background: var(--brand-fill); color: #fff; font-size: 12px; font-weight: 800; padding: 3px 10px; border-radius: 999px; }
   .plan h3 { margin: 0; }
   .price { font-size: 34px; font-weight: 800; margin: 8px 0 2px; }
   .price small { font-size: 15px; color: var(--muted); font-weight: 600; }
@@ -173,10 +176,10 @@
   #map { height: calc(100vh - 330px); min-height: 380px; border-radius: 22px; border: 1px solid var(--line); margin-top: 8px; z-index: 1; }
   .pin { width: 38px; height: 38px; border-radius: 50% 50% 50% 4px; transform: rotate(-45deg); display: grid; place-items: center; border: 3px solid #fff; box-shadow: 0 3px 8px rgba(0,0,0,.3); }
   .pin span { transform: rotate(45deg); font-size: 18px; }
-  .pop h3 { margin: 0 0 2px; font-size: 16px; font-family: 'Nunito', sans-serif; }
-  .pop .meta { font-family: 'Nunito', sans-serif; }
-  .pop .cls { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-family: 'Nunito', sans-serif; font-size: 13px; }
-  .pop .cls .btn { margin-left: auto; padding: 5px 10px; font-size: 12px; }
+  .mappop h3 { margin: 0 0 2px; font-size: 16px; font-family: 'Nunito', sans-serif; }
+  .mappop .meta { font-family: 'Nunito', sans-serif; }
+  .mappop .cls { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-family: 'Nunito', sans-serif; font-size: 13px; }
+  .mappop .cls .btn { margin-left: auto; padding: 5px 10px; font-size: 12px; }
   .maplist { color: var(--muted); font-size: 13px; margin-top: 10px; }
   .ownerbtn { margin-left: auto; background: none; border: 1.5px solid var(--line); border-radius: 999px; padding: 7px 12px; font-weight: 800; font-size: 13px; color: var(--ink); white-space: nowrap; }
   .seg { display: inline-flex; background: #f5efe9; border-radius: 999px; padding: 4px; margin: 4px 0 8px; }
@@ -198,8 +201,10 @@
   .panel textarea, .panel select { font: inherit; width: 100%; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 12px; margin-bottom: 12px; background: #fff; }
   .days { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
   .days label { border: 1.5px solid var(--line); border-radius: 999px; padding: 6px 12px; font-weight: 700; font-size: 14px; cursor: pointer; }
-  .days input { display: none; }
-  .days label:has(input:checked) { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .days input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+  .days label { position: relative; }
+  .days label:has(input:checked) { background: var(--brand-fill); border-color: var(--brand-fill); color: #fff; }
+  .days label:has(input:focus-visible) { outline: 2px solid var(--brand-fill); outline-offset: 2px; }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .stat { flex: 1; background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 14px; text-align: center; }
   .stat b { display: block; font-size: 26px; }
@@ -268,7 +273,7 @@
   .fbtn.on { border-color: var(--brand); color: var(--brand-dark); }
   #filterPanel { background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 14px; margin: 8px 0 14px; }
   .panelfoot { display: flex; gap: 8px; justify-content: flex-end; }
-  @media (max-width: 430px) { .hero { padding: 18px 16px; margin: 12px 0 0; } .hero h1 { font-size: 22px; } }
+  @media (max-width: 430px) { .hero { padding: 16px; margin: 12px 0 0; border-radius: 20px; } .hero h1 { font-size: 21px; } .hero p { font-size: 14.5px; } }
   .chiprows { display: grid; gap: 8px; margin-top: 10px; min-width: 0; }
   .chiprows .chip { padding: 6px 12px; font-size: 14px; }
   .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
@@ -277,7 +282,7 @@
   .calcell b { font-size: 16px; }
   .calcell small { font-size: 11px; font-weight: 700; color: var(--brand-dark); }
   .calcell.zero { opacity: .45; }
-  .calcell.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .calcell.on { background: var(--brand-fill); border-color: var(--brand-fill); color: #fff; }
   .calcell.on span, .calcell.on small { color: #fff; }
   .contact { margin-top: 8px; font-size: 13px; padding: 8px 10px; background: #fbf7f2; border-radius: 10px; }
   .panel textarea { font: inherit; }
@@ -414,7 +419,7 @@
   <button data-tab="profile"><span class="ico">👶</span>Family</button>
 </nav>
 
-<div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
+<div class="modal-bg" id="modalBg"><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
 <div class="toast" id="toast"></div>
 <div id="installTip" role="note"><img src="icon-180.png" alt=""><span data-th><b>Add LittlePass to your home screen.</b> Tap the Share button, then <b>Add to Home Screen</b>.</span><button id="installClose" aria-label="Dismiss" data-taria>×</button></div>
 

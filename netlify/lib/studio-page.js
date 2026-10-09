@@ -67,7 +67,7 @@ ${noindex ? '<meta name="robots" content="noindex">' : ''}
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800&display=swap" rel="stylesheet">
 ${jsonld ? `<script type="application/ld+json">${JSON.stringify(jsonld).replace(/</g, '\\u003c')}</script>` : ''}
 <style>
-  :root { --brand: #ff7a59; --ink: #2d2a32; --muted: #7a7483; --line: #efe7df; --bg: #fffaf5; }
+  :root { --brand: #ff7a59; --brand-fill: #cc4a28; --ink: #2d2a32; --muted: #6b6574; --line: #efe7df; --bg: #fffaf5; }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: 'Nunito', system-ui, sans-serif; color: var(--ink); background: var(--bg); line-height: 1.5; }
   a { color: inherit; }
@@ -79,7 +79,7 @@ ${jsonld ? `<script type="application/ld+json">${JSON.stringify(jsonld).replace(
   .meta { color: var(--muted); font-size: 14px; }
   .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
   .tag { background: #f5efe9; border-radius: 999px; padding: 3px 10px; font-size: 13px; font-weight: 700; }
-  .btn { display: inline-block; background: var(--brand); color: #fff; font-weight: 800; text-decoration: none; padding: 12px 20px; border-radius: 14px; }
+  .btn { display: inline-block; background: var(--brand-fill); color: #fff; font-weight: 800; text-decoration: none; padding: 12px 20px; border-radius: 14px; }
   .btn.ghost { background: #fff; color: var(--ink); border: 1.5px solid var(--line); }
   .photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
   .photos img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 14px; display: block; }
