@@ -2,7 +2,7 @@
 Placeholders are written like [THIS] and are highlighted pink on the page."""
 import re, os
 
-def page(title, body):
+def page(title, body, studio=False):
     ph = lambda t: re.sub(r'\[([A-Z0-9][A-Z0-9_ /\-\.,\'\(\)\$%:&;#]*)\]', r'<span class="ph">[\1]</span>', t)
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,7 +11,7 @@ def page(title, body):
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="legal.css"></head><body><div class="wrap">
 <div class="top"><a class="logo" href="../">🐣 Little<span>Pass</span></a>
-<div class="nav"><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="studio-agreement.html">Studio agreement</a></div></div>
+<div class="nav"><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a>{'<a href="studio-agreement.html">Studio agreement</a>' if studio else ''}</div></div>
 <div class="draft"><b>DRAFT, not yet reviewed by a lawyer.</b> Items in <span class="ph">[PINK BRACKETS]</span> are placeholders or open decisions. This page is not final legal text.</div>
 <div class="card">{ph(body)}</div></div></body></html>'''
 
@@ -29,7 +29,7 @@ TERMS = '''
 <li>You must be at least 18 to create an account. Accounts are for parents and legal guardians.</li>
 <li>Give us accurate information and keep your password safe. You're responsible for activity on your account.</li>
 <li>You may add your children's first names and birthdays so we can suggest classes for their age. Only add information you're entitled to share.</li>
-<li>Studios use a separate account type and are also bound by the <a href="studio-agreement.html">Studio Partner Agreement</a>.</li>
+<li>Studios use a separate account type and are bound by their own agreement with LittlePass.</li>
 </ul>
 
 <h2>3. Plans, credits and billing</h2>
@@ -250,5 +250,5 @@ STUDIO = '''
 '''
 
 for name, title, body in [('terms.html', 'Terms of Service', TERMS), ('privacy.html', 'Privacy Policy', PRIVACY), ('studio-agreement.html', 'Studio Partner Agreement', STUDIO)]:
-    open(os.path.join(os.path.dirname(__file__), name), 'w').write(page(title, body))
+    open(os.path.join(os.path.dirname(__file__), name), 'w').write(page(title, body, studio=(name == 'studio-agreement.html')))
 print('built')

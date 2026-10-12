@@ -373,6 +373,7 @@ function markNav() {
 }
 function renderHeader() {
   const b = $('#creditBtn');
+  document.querySelectorAll('.studioonly').forEach(e => { e.hidden = !(isStudioUser() || isAdmin()); });   // parents never see studio contracts
   $('#ownerBtn').classList.toggle('hidden', !!user);
   $('#langBtn').classList.toggle('hidden', isAdmin() || isStudioUser());
   $('#langBtn').textContent = LANG === 'es' ? 'EN' : 'ES';
