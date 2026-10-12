@@ -63,9 +63,9 @@ const COORDS = {
   'Chula Vista': [32.6401, -117.0842], 'Del Mar': [32.9595, -117.2653],
 };
 const PLANS = [
-  { id: 'sprout', name: 'Sprout', price: 49,  credits: 12, perks: ['About 3 classes a month', 'Free cancellation up to 24h before', 'Unused credits roll over'] },
-  { id: 'bloom',  name: 'Bloom',  price: 89,  credits: 25, perks: ['About 6 classes a month', 'Free cancellation up to 24h before', 'Unused credits roll over'], pop: true },
-  { id: 'grove',  name: 'Grove',  price: 149, credits: 45, perks: ['About 11 classes a month', 'Free cancellation up to 24h before', 'Unused credits roll over'] },
+  { id: 'sprout', name: 'Sprout', price: 79,  credits: 24, perks: ['About 2 classes a month', 'Free cancellation up to 24h before', 'Unused credits roll over'] },
+  { id: 'bloom',  name: 'Bloom',  price: 149, credits: 48, perks: ['About 4 classes a month', 'Free cancellation up to 24h before', 'Unused credits roll over'], pop: true },
+  { id: 'grove',  name: 'Grove',  price: 289, credits: 96, perks: ['About 8 classes a month', 'Free cancellation up to 24h before', 'Unused credits roll over'] },
 ];
 const REVIEW_POOL = [
   ['Maya R.', 5, 'My daughter looks forward to this every week. The teachers are so patient and kind.'],
@@ -93,7 +93,7 @@ let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
 let myPartner = null, adminGrowth = null, adminStats = null, adminUsers = [], adminAudit = [], peopleQ = '', peopleRole = 'all', myLedger = [], histAll = false, editKid = null, editName = false;
 let adminPay = [], adminPayouts = [], adminPricing = null, adminReports = [];
 let waivers = [], mySignatures = [], ownWaivers = [], studioSignatures = [], waiverFlow = null, editWaiver = null;
-let studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [], locations = [], exceptions = [], contacts = [];
+let firstMonthOk = true, studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [], locations = [], exceptions = [], contacts = [];
 
 // ---------- Language ----------
 // Parents can switch to Spanish. ES (i18n.js) maps the English text to Spanish; anything missing stays in English.
@@ -249,15 +249,17 @@ async function loadPrivate() {
       studioBookings = b.data || []; payouts = po.data || []; ownWaivers = ow.data || []; studioSignatures = sg.data || [];
     }
   } else {
-    const [k, b, w, l, sg, pd] = await Promise.all([
+    const [k, b, w, l, sg, pd, fm] = await Promise.all([
       sb.from('kids').select('*').order('created_at'),
       sb.from('bookings').select('*').eq('user_id', user.id),
       sb.rpc('my_waitlist'),
       sb.from('credit_ledger').select('delta, reason, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(200),
       sb.from('waiver_signatures').select('*').eq('user_id', user.id).order('signed_at', { ascending: false }),
       sb.rpc('partner_dashboard'),
+      sb.rpc('first_month_eligible'),
     ]);
     myPartner = pd.error ? null : pd.data;
+    firstMonthOk = fm.error ? true : !!fm.data;
     const mine = b.data || []; myWaitlist = w.data || []; myLedger = l.data || []; mySignatures = sg.data || [];
     kids = k.data || []; myBookings = mine.filter(x => x.session_date >= todayStr); pastBookings = mine.filter(x => x.session_date < todayStr);
   }
@@ -348,7 +350,7 @@ function sessionFromBooking(b) {
 
 // Plans come from the database; the built-in list is only a fallback before it loads
 const planList = () => plansDb.length
-  ? plansDb.filter(p => p.active).map(p => ({ id: p.id, name: p.name, price: p.price_cents / 100, credits: p.credits, perks: p.perks, pop: p.popular, ready: !!p.stripe_price_id }))
+  ? plansDb.filter(p => p.active).map(p => ({ id: p.id, name: p.name, price: p.price_cents / 100, credits: p.credits, perks: p.perks, pop: p.popular, ready: true }))   // the Stripe price is created at checkout if the plan has none yet
   : PLANS.map(p => ({ ...p, ready: false }));
 
 // ---------- Header + navigation ----------
@@ -1007,6 +1009,7 @@ function renderPlans() {
       <h3>${esc(p.name)}</h3>
       <div class="price">$${p.price}<small>${T('/month')}</small></div>
       <div class="meta">${T('⭐ {n} credits every month', { n: p.credits })}</div>
+      ${firstMonthOk && !subActive() && isParent ? `<div class="meta" style="color:var(--brand-fill);font-weight:700;margin-top:6px">${T('🎉 First month half price: {first}, then {price} a month', { first: '$' + (p.price / 2).toFixed(2), price: '$' + p.price })}</div>` : ''}
       <ul>${p.perks.map(x => `<li>${esc(T(x))}</li>`).join('')}</ul>${btn}</div>`;
   }).join('');
 }

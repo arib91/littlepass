@@ -34,7 +34,7 @@ TERMS = '''
 
 <h2>3. Plans, credits and billing</h2>
 <h3>Subscriptions</h3>
-<p>Plans are monthly subscriptions. <b>Your plan renews automatically every month until you cancel</b>, and we charge your payment method on file the plan price shown at checkout, plus any applicable taxes. Payments are processed by Stripe. We don't see or store your full card number.</p>
+<p>Plans are monthly subscriptions. <b>Your plan renews automatically every month until you cancel</b>, and we charge your payment method on file the plan price shown at checkout, plus any applicable taxes. <b>New members pay half the plan price for their first month</b>; after that, the plan renews every month at the full price shown on the Plans page until you cancel. Payments are processed by Stripe. We don't see or store your full card number.</p>
 <h3>Credits</h3>
 <ul>
 <li>Each plan gives you a set number of credits every month. You use credits to book classes. The number of credits a class costs is shown before you book and can differ from class to class.</li>

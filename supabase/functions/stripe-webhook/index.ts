@@ -13,10 +13,11 @@ async function syncSubscription(subId: string) {
   const sub = await stripe.subscriptions.retrieve(subId);
   const userId = sub.metadata?.user_id;
   if (!userId) { console.log('Subscription without user_id, ignoring', subId); return null; }
-  const priceId = sub.items.data[0]?.price?.id;
-  const { data: plan } = priceId
-    ? await db.from('plans').select('*').eq('stripe_price_id', priceId).maybeSingle()
-    : { data: null };
+  const price = sub.items.data[0]?.price;
+  // Normally the plan is found by its Stripe price; a price made a moment ago also carries the plan id.
+  let plan: Record<string, any> | null = null;
+  if (price?.id) ({ data: plan } = await db.from('plans').select('*').eq('stripe_price_id', price.id).maybeSingle());
+  if (!plan && price?.metadata?.plan_id) ({ data: plan } = await db.from('plans').select('*').eq('id', price.metadata.plan_id).maybeSingle());
   const { error } = await db.rpc('set_subscription', {
     p_user: userId,
     p_customer: String(sub.customer),
