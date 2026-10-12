@@ -256,7 +256,7 @@ const ES = {
   "Please add a name and birthday": "Agrega un nombre y una fecha de nacimiento",
   "Saved": "Guardado",
   "Added {name} 💛": "Agregamos a {name} 💛",
-  "Log in or sign up to book classes. New accounts start with 10 free credits.": "Inicia sesión o crea una cuenta para reservar. Las cuentas nuevas empiezan con 10 créditos gratis.",
+  "Log in or sign up to book classes. Your first month is half price.": "Inicia sesión o crea una cuenta para reservar. Tu primer mes es a mitad de precio.",
   "Only parent accounts can book classes.": "Solo las cuentas de mamás y papás pueden reservar clases.",
   "{day} at {time}": "{day} a las {time}",
   "Ages {ages}": "Edades {ages}",

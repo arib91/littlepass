@@ -2268,7 +2268,7 @@ async function handleClick(e) {
   }
   if ((el = hit('[data-book]'))) {
     if (map) map.closePopup();
-    if (!user) return openAuth('signup', T('Log in or sign up to book classes. New accounts start with 10 free credits.'), 'parent');
+    if (!user) return openAuth('signup', T('Log in or sign up to book classes. Your first month is half price.'), 'parent');
     if (profile && profile.role !== 'parent') return toast(T('Only parent accounts can book classes.'));
     const s = SESSIONS.find(x => x.id === el.dataset.book), credits = profile ? profile.credits : 0, enough = credits >= s.credits;
     const late = new Date(`${s.dateStr}T${s.time24}`) - Date.now() < cancelHours * 36e5;
