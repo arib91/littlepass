@@ -1173,10 +1173,8 @@ async function afterCheckout(result) {
   }
   toast(T('Still processing. Your credits will appear in a minute.'));
 }
-// ---------- Kids: optional gender, and picks for each child ----------
-const GENDERS = { girl: ['👧', 'Girl'], boy: ['👦', 'Boy'], other: ['👶', 'Prefer not to say'] };
-const kidEmoji = k => (k.gender && GENDERS[k.gender] ? GENDERS[k.gender][0] : '👶');
-const genderSelect = (id, sel) => `<select id="${id}" aria-label="${T('Gender (optional)')}"><option value="">${T('Gender (optional)')}</option>${Object.entries(GENDERS).map(([v, g]) => `<option value="${v}" ${sel === v ? 'selected' : ''}>${T(g[1])}</option>`).join('')}</select>`;
+// ---------- Kids: picks for each child ----------
+const kidEmoji = k => '👶';
 // Classes that fit a child's age with spots in the next two weeks. Categories this parent has already booked come first.
 function picksFor(k, n = 4) {
   const m = monthsOld(k.birthday);
@@ -1192,18 +1190,19 @@ function renderPicks() {
   if (picksKid >= kids.length) picksKid = 0;
   const k = kids[picksKid], list = picksFor(k);
   box.innerHTML = `<div class="panel picks"><div class="label">✨ ${T('Picked for {name}', { name: esc(k.name) })}</div>
-    ${kids.length > 1 ? `<div class="chips" style="margin-bottom:8px">${kids.map((x, i) => `<button class="chip ${i === picksKid ? 'on' : ''}" data-picksfor="${i}">${kidEmoji(x)} ${esc(x.name)}</button>`).join('')}</div>` : ''}
+    ${kids.length > 1 ? `<div class="chips" style="margin-bottom:8px">${kids.map((x, i) => `<button class="chip ${i === picksKid ? 'on' : ''}" data-picksfor="${i}">👶 ${esc(x.name)}</button>`).join('')}</div>` : ''}
     ${list.length ? `<div class="grid">${list.map(s => card(s)).join('')}</div>` : `<p class="meta" style="margin:0">${T('No open classes for this age in the next two weeks. Try the filters below.')}</p>`}</div>`;
 }
-// A one-time prompt for parents who have not added a child yet
+// A one-time prompt for parents who have not added a child yet. It is a family plan, so it asks for every child.
+const kidRow = () => `<div class="kidrow"><input data-fkname maxlength="60" placeholder="${T('Name')}" aria-label="${T('Name')}"><input data-fkbday type="date" max="${todayStr}" aria-label="${T('Birthday')}"></div>`;
 function maybeAskKid() {
   if (kidPromptShown || !user || !profile || profile.role !== 'parent' || kids.length || !loaded) return;
   let seen = false; try { seen = !!localStorage.getItem('lp_kidprompt_' + user.id); } catch (e) {}
   if (seen) return;
   kidPromptShown = true;
-  openModal(`<h2>${T('Tell us about your child 💛')}</h2><p class="meta" style="margin-top:0">${T("We use your child's age to suggest classes that fit. Gender is optional and never required to book.")}</p>
-    <input id="fkName" maxlength="60" placeholder="${T('Name')}"><div class="label">${T('Birthday')}</div><input id="fkBday" type="date" max="${todayStr}">
-    ${genderSelect('fkGender', '')}
+  openModal(`<h2>${T('Tell us about your children 💛')}</h2><p class="meta" style="margin-top:0">${T("LittlePass is a family plan, so add every child who might take classes. We use their ages to suggest classes that fit.")}</p>
+    <div id="fkRows">${kidRow()}</div>
+    <button class="btn ghost" data-morekid style="margin:4px 0 10px">${T('+ Add another child')}</button>
     <div class="actions"><button class="btn ghost" data-skipkid>${T('Skip for now')}</button><button class="btn" data-savefirstkid>${T('Save')}</button></div>`);
 }
 function renderProfile() {
@@ -1227,15 +1226,13 @@ function renderProfile() {
     ${isStudio ? '' : `<div class="panel">
       <div class="label">${T('Add a child')}</div><input id="kidName" placeholder="${T('Name')}">
       <div class="label">${T('Birthday')}</div><input id="kidBday" type="date" max="${todayStr}">
-      ${genderSelect('kidGender', '')}
       <button class="btn" data-addkid>${T('Add child')}</button></div>
     <div class="panel"><div class="label">${T('Your kids')}</div>${kids.length ? kids.map(k => {
       const m = monthsOld(k.birthday);
       if (editKid === k.id) return `<div class="kid" style="flex-wrap:wrap"><input id="ekName" maxlength="60" value="${esc(k.name)}" style="flex:1 1 140px;margin:0">
         <input id="ekBday" type="date" value="${esc(k.birthday)}" style="flex:1 1 140px;margin:0">
-        ${genderSelect('ekGender', k.gender || '')}
         <button class="btn" data-savekid="${k.id}">${T('Save')}</button><button class="btn ghost" data-editkid="">${T('Cancel')}</button></div>`;
-      return `<div class="kid"><span style="font-size:24px">${kidEmoji(k)}</span><div><b>${esc(k.name)}</b><div class="meta">${m < 24 ? T('{n} months old', { n: m }) : T('{n} years old', { n: Math.floor(m / 12) })}</div></div>
+      return `<div class="kid"><span style="font-size:24px">👶</span><div><b>${esc(k.name)}</b><div class="meta">${m < 24 ? T('{n} months old', { n: m }) : T('{n} years old', { n: Math.floor(m / 12) })}</div></div>
         <span style="margin-left:auto;display:flex;gap:6px"><button class="btn ghost" data-editkid="${k.id}">${T('Edit')}</button><button class="btn ghost" data-rmkid="${k.id}">${T('Remove')}</button></span></div>`;
     }).join('') : `<p class="meta">${T("Add your child and we'll show classes for their exact age.")}</p>`}</div>
     ${creditHistoryPanel()}
@@ -2351,23 +2348,24 @@ async function handleClick(e) {
   if ((el = hit('[data-savekid]'))) {
     const name = $('#ekName').value.trim(), bday = $('#ekBday').value;
     if (!name || !bday) return toast(T('Please add a name and birthday'));
-    const { error } = await sb.from('kids').update({ name, birthday: bday, ...($('#ekGender').value ? { gender: $('#ekGender').value } : { gender: null }) }).eq('id', el.dataset.savekid);
+    const { error } = await sb.from('kids').update({ name, birthday: bday }).eq('id', el.dataset.savekid);
     if (error) return toast(tx(error.message));
     editKid = null; await loadPrivate(); renderProfile(); renderFilters(); renderResults(); toast(T('Saved')); return;
   }
   if ((el = hit('[data-picksfor]'))) { picksKid = +el.dataset.picksfor; renderPicks(); return; }
   if (hit('[data-skipkid]')) { try { localStorage.setItem('lp_kidprompt_' + user.id, '1'); } catch (e) {} closeModal(); return; }
+  if (hit('[data-morekid]')) { $('#fkRows').insertAdjacentHTML('beforeend', kidRow()); const n = document.querySelectorAll('#fkRows [data-fkname]'); n[n.length - 1].focus(); return; }
   if (hit('[data-savefirstkid]')) {
-    const name = $('#fkName').value.trim(), bday = $('#fkBday').value;
-    if (!name || !bday) return toast(T('Please add a name and birthday'));
-    const { error } = await sb.from('kids').insert({ user_id: user.id, name, birthday: bday, ...($('#fkGender').value ? { gender: $('#fkGender').value } : {}) });
+    const rows = [...document.querySelectorAll('#fkRows .kidrow')].map(r => ({ name: r.querySelector('[data-fkname]').value.trim(), birthday: r.querySelector('[data-fkbday]').value })).filter(r => r.name || r.birthday);
+    if (!rows.length || rows.some(r => !r.name || !r.birthday)) return toast(T('Please add a name and birthday'));
+    const { error } = await sb.from('kids').insert(rows.map(r => ({ user_id: user.id, ...r })));
     if (error) return toast(tx(error.message));
-    closeModal(); await loadPrivate(); renderAll(); toast(T('Added {name} 💛', { name })); return;
+    closeModal(); await loadPrivate(); renderAll(); toast(rows.length > 1 ? T('Added {n} children 💛', { n: rows.length }) : T('Added {name} 💛', { name: rows[0].name })); return;
   }
   if (hit('[data-addkid]')) {
     const name = $('#kidName').value.trim(), bday = $('#kidBday').value;
     if (!name || !bday) return toast(T('Please add a name and birthday'));
-    const { error } = await sb.from('kids').insert({ user_id: user.id, name, birthday: bday, ...($('#kidGender').value ? { gender: $('#kidGender').value } : {}) });
+    const { error } = await sb.from('kids').insert({ user_id: user.id, name, birthday: bday });
     if (error) return toast(tx(error.message));
     await loadPrivate(); renderProfile(); renderFilters(); toast(T('Added {name} 💛', { name })); return;
   }
