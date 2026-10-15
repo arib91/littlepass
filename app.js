@@ -92,7 +92,7 @@ let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentS
 let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
-let myPartner = null, adminGrowth = null, adminStats = null, adminUsers = [], adminAudit = [], peopleQ = '', peopleRole = 'all', myLedger = [], histAll = false, editKid = null, editName = false;
+let myPartner = null, adminGrowth = null, adminStats = null, adminUsers = [], adminAudit = [], peopleQ = '', peopleRole = 'all', myLedger = [], histAll = false, editKid = null, editName = false, picksKid = 0, kidPromptShown = false;
 let adminPay = [], adminPayouts = [], adminPricing = null, adminReports = [];
 let waivers = [], mySignatures = [], ownWaivers = [], studioSignatures = [], waiverFlow = null, editWaiver = null;
 let firstMonthOk = true, studioPhotos = [], pastBookings = [], rvClassFilter = 'all', bookView = 'upcoming', plansDb = [], locations = [], exceptions = [], contacts = [];
@@ -268,7 +268,7 @@ async function loadPrivate() {
 }
 async function refresh() {
   await loadPublic(); await loadPrivate();
-  buildSessions(); renderAll();
+  buildSessions(); renderAll(); maybeAskKid();
 }
 
 // ---------- Sessions ----------
@@ -1173,6 +1173,39 @@ async function afterCheckout(result) {
   }
   toast(T('Still processing. Your credits will appear in a minute.'));
 }
+// ---------- Kids: optional gender, and picks for each child ----------
+const GENDERS = { girl: ['👧', 'Girl'], boy: ['👦', 'Boy'], other: ['👶', 'Prefer not to say'] };
+const kidEmoji = k => (k.gender && GENDERS[k.gender] ? GENDERS[k.gender][0] : '👶');
+const genderSelect = (id, sel) => `<select id="${id}" aria-label="${T('Gender (optional)')}"><option value="">${T('Gender (optional)')}</option>${Object.entries(GENDERS).map(([v, g]) => `<option value="${v}" ${sel === v ? 'selected' : ''}>${T(g[1])}</option>`).join('')}</select>`;
+// Classes that fit a child's age with spots in the next two weeks. Categories this parent has already booked come first.
+function picksFor(k, n = 4) {
+  const m = monthsOld(k.birthday);
+  const liked = {};
+  [...myBookings, ...pastBookings].forEach(b => { const c = classes.find(x => x.id === b.class_id); if (c) liked[c.cat] = (liked[c.cat] || 0) + 1; });
+  return SESSIONS.filter(s => s.ageMax && s.ageMin <= m && s.ageMax >= m && s.spots > 0 && !isBooked(s.id) && s.date <= DAYS[13])
+    .map(s => ({ s, score: (liked[s.cat] || 0) * 2 })).sort((x, y) => y.score - x.score || x.s.date - y.s.date || timeVal(x.s.time) - timeVal(y.s.time))
+    .slice(0, n).map(x => x.s);
+}
+function renderPicks() {
+  const box = $('#picks'); if (!box) return;
+  if (!user || !profile || profile.role !== 'parent' || !kids.length) { box.innerHTML = ''; return; }
+  if (picksKid >= kids.length) picksKid = 0;
+  const k = kids[picksKid], list = picksFor(k);
+  box.innerHTML = `<div class="panel picks"><div class="label">✨ ${T('Picked for {name}', { name: esc(k.name) })}</div>
+    ${kids.length > 1 ? `<div class="chips" style="margin-bottom:8px">${kids.map((x, i) => `<button class="chip ${i === picksKid ? 'on' : ''}" data-picksfor="${i}">${kidEmoji(x)} ${esc(x.name)}</button>`).join('')}</div>` : ''}
+    ${list.length ? `<div class="grid">${list.map(s => card(s)).join('')}</div>` : `<p class="meta" style="margin:0">${T('No open classes for this age in the next two weeks. Try the filters below.')}</p>`}</div>`;
+}
+// A one-time prompt for parents who have not added a child yet
+function maybeAskKid() {
+  if (kidPromptShown || !user || !profile || profile.role !== 'parent' || kids.length || !loaded) return;
+  let seen = false; try { seen = !!localStorage.getItem('lp_kidprompt_' + user.id); } catch (e) {}
+  if (seen) return;
+  kidPromptShown = true;
+  openModal(`<h2>${T('Tell us about your child 💛')}</h2><p class="meta" style="margin-top:0">${T("We use your child's age to suggest classes that fit. Gender is optional and never required to book.")}</p>
+    <input id="fkName" maxlength="60" placeholder="${T('Name')}"><div class="label">${T('Birthday')}</div><input id="fkBday" type="date" max="${todayStr}">
+    ${genderSelect('fkGender', '')}
+    <div class="actions"><button class="btn ghost" data-skipkid>${T('Skip for now')}</button><button class="btn" data-savefirstkid>${T('Save')}</button></div>`);
+}
 function renderProfile() {
   const el = $('#view-profile');
   if (!user) {
@@ -1193,14 +1226,16 @@ function renderProfile() {
     ${isStudio ? '' : partnerPanel()}
     ${isStudio ? '' : `<div class="panel">
       <div class="label">${T('Add a child')}</div><input id="kidName" placeholder="${T('Name')}">
-      <div class="label">${T('Birthday')}</div><input id="kidBday" type="date">
+      <div class="label">${T('Birthday')}</div><input id="kidBday" type="date" max="${todayStr}">
+      ${genderSelect('kidGender', '')}
       <button class="btn" data-addkid>${T('Add child')}</button></div>
     <div class="panel"><div class="label">${T('Your kids')}</div>${kids.length ? kids.map(k => {
       const m = monthsOld(k.birthday);
       if (editKid === k.id) return `<div class="kid" style="flex-wrap:wrap"><input id="ekName" maxlength="60" value="${esc(k.name)}" style="flex:1 1 140px;margin:0">
         <input id="ekBday" type="date" value="${esc(k.birthday)}" style="flex:1 1 140px;margin:0">
+        ${genderSelect('ekGender', k.gender || '')}
         <button class="btn" data-savekid="${k.id}">${T('Save')}</button><button class="btn ghost" data-editkid="">${T('Cancel')}</button></div>`;
-      return `<div class="kid"><span style="font-size:24px">👶</span><div><b>${esc(k.name)}</b><div class="meta">${m < 24 ? T('{n} months old', { n: m }) : T('{n} years old', { n: Math.floor(m / 12) })}</div></div>
+      return `<div class="kid"><span style="font-size:24px">${kidEmoji(k)}</span><div><b>${esc(k.name)}</b><div class="meta">${m < 24 ? T('{n} months old', { n: m }) : T('{n} years old', { n: Math.floor(m / 12) })}</div></div>
         <span style="margin-left:auto;display:flex;gap:6px"><button class="btn ghost" data-editkid="${k.id}">${T('Edit')}</button><button class="btn ghost" data-rmkid="${k.id}">${T('Remove')}</button></span></div>`;
     }).join('') : `<p class="meta">${T("Add your child and we'll show classes for their exact age.")}</p>`}</div>
     ${creditHistoryPanel()}
@@ -2316,14 +2351,23 @@ async function handleClick(e) {
   if ((el = hit('[data-savekid]'))) {
     const name = $('#ekName').value.trim(), bday = $('#ekBday').value;
     if (!name || !bday) return toast(T('Please add a name and birthday'));
-    const { error } = await sb.from('kids').update({ name, birthday: bday }).eq('id', el.dataset.savekid);
+    const { error } = await sb.from('kids').update({ name, birthday: bday, ...($('#ekGender').value ? { gender: $('#ekGender').value } : { gender: null }) }).eq('id', el.dataset.savekid);
     if (error) return toast(tx(error.message));
     editKid = null; await loadPrivate(); renderProfile(); renderFilters(); renderResults(); toast(T('Saved')); return;
+  }
+  if ((el = hit('[data-picksfor]'))) { picksKid = +el.dataset.picksfor; renderPicks(); return; }
+  if (hit('[data-skipkid]')) { try { localStorage.setItem('lp_kidprompt_' + user.id, '1'); } catch (e) {} closeModal(); return; }
+  if (hit('[data-savefirstkid]')) {
+    const name = $('#fkName').value.trim(), bday = $('#fkBday').value;
+    if (!name || !bday) return toast(T('Please add a name and birthday'));
+    const { error } = await sb.from('kids').insert({ user_id: user.id, name, birthday: bday, ...($('#fkGender').value ? { gender: $('#fkGender').value } : {}) });
+    if (error) return toast(tx(error.message));
+    closeModal(); await loadPrivate(); renderAll(); toast(T('Added {name} 💛', { name })); return;
   }
   if (hit('[data-addkid]')) {
     const name = $('#kidName').value.trim(), bday = $('#kidBday').value;
     if (!name || !bday) return toast(T('Please add a name and birthday'));
-    const { error } = await sb.from('kids').insert({ user_id: user.id, name, birthday: bday });
+    const { error } = await sb.from('kids').insert({ user_id: user.id, name, birthday: bday, ...($('#kidGender').value ? { gender: $('#kidGender').value } : {}) });
     if (error) return toast(tx(error.message));
     await loadPrivate(); renderProfile(); renderFilters(); toast(T('Added {name} 💛', { name })); return;
   }
@@ -2483,7 +2527,7 @@ function showTab(name) {
 document.querySelector('nav.tabs').onclick = e => { const b = e.target.closest('[data-tab]'); if (b) showTab(b.dataset.tab); };
 
 function renderAll() {
-  renderHeader(); renderFilters(); renderResults(); renderBookings(); renderPlans(); renderProfile();
+  renderHeader(); renderPicks(); renderFilters(); renderResults(); renderBookings(); renderPlans(); renderProfile();
   if (!$('#view-studio').classList.contains('hidden')) renderStudio();
   if (!$('#view-owner').classList.contains('hidden')) renderOwner();
   if (!$('#view-admin').classList.contains('hidden')) renderAdmin();
