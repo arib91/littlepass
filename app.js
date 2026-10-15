@@ -80,6 +80,9 @@ const REVIEW_POOL = [
 const PARENT_STAYS = { stays: '👨‍👩‍👧 Parent stays', dropoff: '🚪 Drop-off', either: '👨‍👩‍👧 Parent stays or drop-off' };
 const LEVELS = { beginner: '🌱 First-timers welcome', all: '✨ All levels', advanced: '🏅 Some experience helps' };
 const classById = id => classes.find(c => c.id === id);
+// The photo a studio chose for a class (one of its own studio photos), or null
+const classPhotoUrl = c => { const p = c && c.photo_id && studioPhotos.find(x => x.id === c.photo_id); return p ? sb.storage.from('studio-photos').getPublicUrl(p.path).data.publicUrl : null; };
+const snip = (t, n = 110) => !t ? '' : t.length > n ? t.slice(0, n).replace(/\s+\S*$/, '') + '…' : t;
 const safeUrl = u => { const t = String(u || '').trim(); if (!t) return ''; const full = /^https?:\/\//i.test(t) ? t : 'https://' + t; try { const x = new URL(full); return /^https?:$/.test(x.protocol) ? x.href : ''; } catch (e) { return ''; } };
 const TERMS_VERSION = 'draft-1'; // bump when the legal text changes
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -609,9 +612,10 @@ function card(s, mode) {
   else if (mode === 'booking') action = bk && !cancellable(bk) ? `<button class="btn ghost" disabled>${T("Can't cancel")}</button><div class="meta" style="font-size:11px">${T('Within {h}h of start', { h: cancelHours })}</div>` : `<button class="btn ghost" data-cancel="${bk.id}">${T('Cancel')}</button>`;
   else action = sessBtn(s) || `<button class="btn" data-book="${s.id}">${T('Book')}</button>`;
   return `<div class="card">
-    <div class="emoji" style="background:${c.color}">${c.emoji}</div>
+    ${(() => { const cl = s.classId && classById(s.classId), u = classPhotoUrl(cl); return u ? `<img class="emoji cardphoto" loading="lazy" alt="${esc(s.title)}" src="${u}">` : `<div class="emoji" style="background:${c.color}">${c.emoji}</div>`; })()}
     <div>
       <h3>${esc(s.title)}</h3>
+      ${(() => { const cl = s.classId && classById(s.classId); return mode !== 'booking' && cl && cl.description ? `<p class="snip">${esc(snip(cl.description))}</p>` : ''; })()}
       <div class="meta"><a class="lnk" data-studio="${esc(s.studio)}">${esc(s.studio)}</a><br>📍 ${esc(s.hood)} · 🕘 ${mode === 'booking' ? dayName(s.date) + ', ' : ''}<span class="nw">${s.time}${s.mins ? ` (${s.mins} min)` : ''}</span>${s.loc ? (mode === 'booking' ? `<br>🧭 ${esc(s.loc.address)}<br>${dirLinks(s.loc)}` : ` · <a class="lnk" href="${gmaps(s.loc)}" target="_blank" rel="noopener">${T('Directions')}</a>`) : ''}</div>
       <div class="tags">
         ${bk ? `<span class="tag">👶 ${esc(bk.attendee_name)}</span>` : ''}${wl ? `<span class="tag low">${T('⏳ Waitlist #{n}', { n: wl.place })} · ${esc(wl.attendee_name)}</span>` : ''}
@@ -764,13 +768,15 @@ function openDetails(classId) {
   const st = studioById(c.studio_id), cat = CATS[c.cat] || CATS.all, rt = classRating(c.id), loc = locByClass(c.id);
   const next = SESSIONS.filter(s => s.classId === c.id).sort((a, b) => a.date - b.date || timeVal(a.time) - timeVal(b.time)).slice(0, 5);
   openModal(`
-    <div class="emoji" style="background:${cat.color};margin-bottom:10px">${cat.emoji}</div>
+    ${classPhotoUrl(c) ? `<img class="herophoto" alt="${esc(c.title)}" src="${classPhotoUrl(c)}">` : `<div class="emoji" style="background:${cat.color};margin-bottom:10px">${cat.emoji}</div>`}
     <h2 style="margin-bottom:2px">${esc(c.title)}</h2>
     <div class="meta"><a class="lnk" data-studio="${esc(st ? st.name : '')}">${esc(st ? st.name : '')}</a> · 📍 ${esc(c.hood)}${rt ? ` · ★ ${rt.avg.toFixed(1)} (${rt.n})` : ''}</div>
     <div class="tags"><span class="tag">👶 ${ageText(c.age_min, c.age_max)}</span><span class="tag">${T(PARENT_STAYS[c.parent_stays] || '')}</span><span class="tag">${T(LEVELS[c.level] || '')}</span></div>
-    ${c.description ? `<p style="white-space:pre-line;margin:12px 0 6px">${esc(c.description)}</p>` : `<p class="meta" style="margin:12px 0 6px">${T("The studio hasn't added a description yet.")}</p>`}
-    ${c.focus ? `<p style="margin:6px 0"><b>${T('Focus:')}</b> ${esc(c.focus)}</p>` : ''}
-    ${c.what_to_bring ? `<p style="margin:6px 0"><b>${T('What to bring:')}</b> ${esc(c.what_to_bring)}</p>` : ''}
+    ${c.description ? `<div class="label" style="margin-top:12px">${T('About this class')}</div><p style="white-space:pre-line;margin:2px 0 6px">${esc(c.description)}</p>` : `<p class="meta" style="margin:12px 0 6px">${T("The studio hasn't added a description yet.")}</p>`}
+    ${c.focus ? `<div class="label" style="margin-top:10px">${T('What your child will practice')}</div><p style="margin:2px 0 6px">${esc(c.focus)}</p>` : ''}
+    ${c.first_visit ? `<div class="label" style="margin-top:10px">${T('Your first visit')}</div><p style="margin:2px 0 6px">${esc(c.first_visit)}</p>` : ''}
+    ${c.what_to_bring ? `<div class="label" style="margin-top:10px">${T('What to bring')}</div><p style="margin:2px 0 6px">${esc(c.what_to_bring)}</p>` : ''}
+    ${c.instructor ? `<div class="label" style="margin-top:10px">${T('Your instructor')}</div><p style="margin:2px 0 6px"><b>${esc(c.instructor)}</b>${c.instructor_bio ? ` · ${esc(c.instructor_bio)}` : ''}</p>` : ''}
     ${loc ? `<p style="margin:6px 0">🧭 ${esc(loc.address)}<br>${dirLinks(loc)}</p>` : c.has_address ? `<p class="meta" style="margin:6px 0">${T('🔒 The exact address is shared once you book.')}</p>` : ''}
     ${waiverNote(c.id)}
     <div class="label" style="margin-top:12px">${T('Next sessions')}</div>
@@ -1341,6 +1347,13 @@ const scheduleForm = () => `
   <div><div class="label">Your price per booking ($)</div><input data-ns="price" type="number" value="15" min="0" max="500" step="0.5"></div></div>
   <div class="meta nscr" style="margin:-4px 0 12px">Parents will pay ⭐ … credits</div>`;
 
+// A short to-do list that shows a studio what parents still can't see about a class
+function classChecklist(c) {
+  const items = [[(c.description || '').length >= 60, 'a description (at least 60 characters)'], [!!c.focus, 'what your child will practice'], [!!c.what_to_bring, 'what to bring'],
+    [!!c.first_visit, 'your first visit'], [!!c.instructor, 'the instructor'], [!!c.photo_id, 'a class photo'], [!!locByClass(c.id), 'an address']];
+  const done = items.filter(x => x[0]).length, missing = items.filter(x => !x[0]).map(x => x[1]);
+  return `<div class="meter"><b>Class page: ${done} of ${items.length} done</b><div class="fillbar"><div style="width:${done / items.length * 100}%"></div></div>${missing.length ? `<div class="mini">Parents book more when they can see: ${missing.join(', ')}.</div>` : '<div class="mini">Complete. Parents can see everything they need. 🎉</div>'}</div>`;
+}
 function ownerClasses(el, st) {
   const cs = classes.filter(c => c.studio_id === st.id);
   el.innerHTML = `<h2 style="margin:24px 0 4px">Classes & schedule</h2>
@@ -1357,9 +1370,17 @@ function ownerClasses(el, st) {
           return `<div class="two"><div><div class="label">Address</div><input data-lf="address" value="${esc(l ? l.address : '')}" placeholder="123 Main St, San Diego, CA" maxlength="200"></div>
           <div><div class="label">Who can see it</div><select data-lf="visibility"><option value="booked" ${!l || l.visibility === 'booked' ? 'selected' : ''}>Only parents who booked</option><option value="public" ${l && l.visibility === 'public' ? 'selected' : ''}>Everyone</option></select></div></div>
           <div class="meta" style="margin:-4px 0 10px">${!l ? 'No address yet. Add one so parents can get directions.' : l.lat != null ? '📍 Found on the map. ' + (l.visibility === 'public' ? 'Everyone sees the exact pin and directions.' : 'Others see only the neighborhood until they book.') : '⚠️ We couldn\'t place this address on the map. Check the spelling. Parents still get directions.'}</div>`; })()}
-        <div><div class="label">Description</div><textarea data-cf="description" rows="3" maxlength="600" placeholder="What happens in this class? What will your little one do?">${esc(c.description || '')}</textarea></div>
-        <div class="two"><div><div class="label">Focus</div><input data-cf="focus" maxlength="120" value="${esc(c.focus || '')}" placeholder="e.g. rhythm, listening, first words"></div>
+        ${classChecklist(c)}
+        <div><div class="label">Description</div><textarea data-cf="description" rows="4" maxlength="600" placeholder="What happens in a typical class, start to finish? Who is it for? Example: A 45-minute swim class in a warm pool where parents hold babies through songs, floating and splashing. Small groups of 6, one instructor.">${esc(c.description || '')}</textarea>
+        <div class="mini">${(c.description || '').length}/600 · Aim for 2 to 4 sentences: what happens, who it is for, group size.</div></div>
+        <div class="two"><div><div class="label">What your child will practice</div><input data-cf="focus" maxlength="120" value="${esc(c.focus || '')}" placeholder="e.g. rhythm, listening, first words"></div>
         <div><div class="label">What to bring</div><input data-cf="what_to_bring" maxlength="200" value="${esc(c.what_to_bring || '')}" placeholder="e.g. swim diaper, towel"></div></div>
+        <div><div class="label">Your first visit</div><input data-cf="first_visit" maxlength="300" value="${esc(c.first_visit || '')}" placeholder="e.g. Arrive 10 minutes early, shoes off at the door, check in with the front desk"></div>
+        <div class="two"><div><div class="label">Instructor</div><input data-cf="instructor" maxlength="80" value="${esc(c.instructor || '')}" placeholder="e.g. Ms. Dana"></div>
+        <div><div class="label">About the instructor</div><input data-cf="instructor_bio" maxlength="300" value="${esc(c.instructor_bio || '')}" placeholder="e.g. 10 years teaching toddlers, certified in infant CPR"></div></div>
+        ${(() => { const ph = studioPhotos.filter(p => p.studio_id === c.studio_id);
+          return `<div><div class="label">Class photo</div><select data-cf="photo_id"><option value="">No photo</option>${ph.map((p, i) => `<option value="${p.id}" ${c.photo_id === p.id ? 'selected' : ''}>${esc(p.caption || 'Photo ' + (i + 1))}</option>`).join('')}</select>
+          <div class="mini">${ph.length ? 'Choose one of your studio photos to show on this class.' : 'Add photos on the Page tab first, then pick one here.'}</div></div>`; })()}
         <div class="two"><div><div class="label">Parent stays?</div><select data-cf="parent_stays">${Object.entries(PARENT_STAYS).map(([k, v]) => `<option value="${k}" ${c.parent_stays === k ? 'selected' : ''}>${v.replace(/^\S+\s/, '')}</option>`).join('')}</select></div>
         <div><div class="label">Level</div><select data-cf="level">${Object.entries(LEVELS).map(([k, v]) => `<option value="${k}" ${c.level === k ? 'selected' : ''}>${v.replace(/^\S+\s/, '')}</option>`).join('')}</select></div></div>
         <div class="label" style="margin-top:4px">Time slots</div>
@@ -1461,7 +1482,7 @@ async function saveLocation(classId, fields, quiet) {
 }
 async function saveClassField(el) {
   const id = el.closest('[data-classbox]').dataset.classbox, c = classes.find(x => x.id === id), f = el.dataset.cf;
-  const nullable = ['description', 'focus', 'what_to_bring'].includes(f);
+  const nullable = ['description', 'focus', 'what_to_bring', 'first_visit', 'instructor', 'instructor_bio', 'photo_id'].includes(f);
   const v = ['age_min', 'age_max'].includes(f) ? +el.value : nullable ? (el.value.trim() || null) : el.value.trim();
   const patch = { [f]: v };
   if (f === 'title' && !v) { toast('Class name can\'t be empty'); return renderOwner(); }
