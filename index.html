@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>LittlePass San Diego | Baby & toddler classes</title>
-<meta name="description" content="Find and book baby and toddler classes across San Diego: swim, music, gym, art, sensory play and more. One membership, many studios.">
+<title>LittlePass San Diego | Kids' classes, ages 0 to 12</title>
+<meta name="description" content="Find and book kids' classes across San Diego for ages 0 to 12: swim, music, gym, dance, art and more. One membership, many studios.">
 <meta name="theme-color" content="#ff7a59">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="LittlePass">
-<meta property="og:title" content="LittlePass: baby & toddler classes in San Diego">
-<meta property="og:description" content="Swim, music, gym, art and more for ages 0 to 5. One membership, many studios.">
+<meta property="og:title" content="LittlePass: kids' classes in San Diego, ages 0 to 12">
+<meta property="og:description" content="Swim, music, gym, dance, art and more for ages 0 to 12. One membership, many studios.">
 <meta property="og:url" content="https://littlepass.netlify.app/">
 <meta property="og:image" content="https://littlepass.netlify.app/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="LittlePass: baby and toddler classes all over San Diego">
+<meta property="og:image:alt" content="LittlePass: kids' classes all over San Diego, ages 0 to 12">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="apple-touch-icon" href="icon-180.png">
@@ -278,6 +278,13 @@
   .chiprows { display: grid; gap: 8px; margin-top: 10px; min-width: 0; }
   .chiprows .chip { padding: 6px 12px; font-size: 14px; }
   .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+  /* date picker shown when you are looking at one studio: a prominent scrolling strip */
+  .daystrip { background: #fff; border: 2px solid var(--brand); border-radius: 16px; padding: 10px 10px 8px; margin: 10px 0; }
+  .daystriphead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-size: 15px; }
+  .stripscroll { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity; }
+  .stripcell { flex: 0 0 52px; scroll-snap-align: start; }
+  .stripcell em { font-style: normal; font-size: 9px; font-weight: 800; color: var(--brand-dark); text-transform: uppercase; }
+  .stripcell.on em { color: #fff; }
   .calcell { border: 1.5px solid var(--line); background: #fff; color: var(--ink); border-radius: 12px; padding: 5px 0 4px; display: flex; flex-direction: column; align-items: center; line-height: 1.15; min-width: 0; }
   .calcell span { font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--muted); }
   .calcell b { font-size: 16px; }
@@ -341,8 +348,8 @@
   <!-- EXPLORE -->
   <section id="view-explore">
     <div class="hero">
-      <h1 data-t>Baby & toddler classes all over San Diego</h1>
-      <p data-t>One membership. Swim, music, gym, art and more, from newborn to age 5.</p>
+      <h1 data-t>Kids' classes all over San Diego</h1>
+      <p data-t>One membership. Swim, music, gym, dance, art and more, from newborn to age 12.</p>
     </div>
 
     <div class="searchrow">
@@ -379,6 +386,7 @@
       <div class="panelfoot"><button class="btn ghost" data-clearfilters data-t>Clear all</button><button class="btn" id="showResults" data-t>Show results</button></div>
     </div>
 
+    <div id="dayStrip"></div>
     <div id="studioHits"></div>
     <div id="results"></div>
     <div id="mapWrap" class="hidden">

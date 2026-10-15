@@ -37,12 +37,14 @@ const slugify = name => String(name).toLowerCase().normalize('NFKD').replace(/[\
 
 // ---------- Static data ----------
 const AGES = [
-  { id: 'all',  label: 'All ages', min: 0,  max: 72 },
+  { id: 'all',  label: 'All ages', min: 0,  max: 144 },
   { id: '0-6',  label: '0–6 mo',   min: 0,  max: 6 },
   { id: '6-12', label: '6–12 mo',  min: 6,  max: 12 },
   { id: '1-2',  label: '1–2 yrs',  min: 12, max: 24 },
   { id: '2-3',  label: '2–3 yrs',  min: 24, max: 36 },
   { id: '3-5',  label: '3–5 yrs',  min: 36, max: 60 },
+  { id: '5-8',  label: '5–8 yrs',  min: 60, max: 96 },
+  { id: '8-12', label: '8–12 yrs', min: 96, max: 144 },
 ];
 const CATS = {
   all:     { label: 'All',              emoji: '✨', color: '#f5efe9' },
@@ -86,7 +88,7 @@ const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 let user = null, profile = null, kids = [], myBookings = [], myWaitlist = [], studioBookings = [], payouts = [];
 let studios = [], classes = [], slots = [], counts = {}, reviews = [], loaded = false, cancelHours = 24;
 let filters = { age: 'all', cat: 'all', hood: HOODS[0], day: 'all', studio: 'all', cls: 'all', q: '' };
-let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentStudio = null;
+let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentStudio = null, studioDay = 'all';
 let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
 let adminStudios = [], adminTab = 'studios', adminFilter = 'pending';
@@ -153,7 +155,7 @@ const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const today = new Date(); today.setHours(0, 0, 0, 0);
 const todayStr = fmt(today);
-const HORIZON = 14; // days parents can see and book
+const HORIZON = 30; // days parents can see and book
 const DAYS = Array.from({ length: HORIZON }, (_, i) => { const d = new Date(today); d.setDate(d.getDate() + i); return d; });
 const dayName = d => {
   const diff = Math.round((d - today) / 864e5);
@@ -477,7 +479,7 @@ function renderFilters() {
   updateFilterBadge();
   renderDayCal();
 }
-// Two-week date grid. Each day shows how many classes match the OTHER filters, so you can see where to look.
+// Thirty-day date grid. Each day shows how many classes match the OTHER filters, so you can see where to look.
 function renderDayCal() {
   const box = $('#dayCal'); if (!box) return;
   const counts = {};
@@ -501,7 +503,7 @@ function matches(s, ignoreDay) {
   let min, max;
   if (filters.age.startsWith('kid')) {
     const k = kids[+filters.age.slice(3)];
-    if (!k) { filters.age = 'all'; min = 0; max = 72; } else min = max = monthsOld(k.birthday);
+    if (!k) { filters.age = 'all'; min = 0; max = 144; } else min = max = monthsOld(k.birthday);
   } else { const a = AGES.find(a => a.id === filters.age); min = a.min; max = a.max; }
   if (!(s.ageMin <= max && s.ageMax >= min)) return false;
   if (filters.cat !== 'all' && s.cat !== filters.cat) return false;
@@ -538,14 +540,34 @@ function clearFilters() {
   filters = { age: 'all', cat: 'all', hood: HOODS[0], day: 'all', studio: 'all', cls: 'all', q: '' };
   $('#searchBox').value = ''; renderFilters(); renderResults();
 }
-// Studios matching the search box or the studio dropdown, shown as quick links
-function renderStudioHits() {
-  const el = $('#studioHits');
+// Studios matching the search box or the studio dropdown
+function studioHitNames() {
   const names = [...new Set(SESSIONS.map(s => s.studio))];
   const terms = filters.q.toLowerCase().split(/\s+/).filter(Boolean);
-  let hits = [];
-  if (filters.studio !== 'all') hits = [filters.studio];
-  else if (terms.length) hits = names.filter(n => terms.every(t => n.toLowerCase().includes(t)));
+  if (filters.studio !== 'all') return [filters.studio];
+  return terms.length ? names.filter(n => terms.every(t => n.toLowerCase().includes(t))) : [];
+}
+// One chip per day, scrolling sideways. 'cells' are [dayIndex, date, count] and 'attr' is the data attribute the click handler listens for.
+function dayStripHtml(counts, current, attr, allLabel) {
+  const cell = (d, i) => {
+    const n = counts[fmt(d)] || 0, on = String(current) === String(i);
+    const top = i === 0 ? T('Today') : d.toLocaleDateString(LOCALE(), { weekday: 'short' });
+    const mon = i === 0 || d.getDate() === 1 ? `<em>${d.toLocaleDateString(LOCALE(), { month: 'short' })}</em>` : '';
+    return `<button class="calcell stripcell ${on ? 'on' : ''} ${n ? '' : 'zero'}" ${attr}="${i}" aria-pressed="${on}" title="${d.toLocaleDateString(LOCALE(), { weekday: 'long', month: 'long', day: 'numeric' })}: ${T(n === 1 ? '{n} class' : '{n} classes', { n })}"><span>${top}</span><b>${d.getDate()}</b>${mon}<small>${n || '·'}</small></button>`;
+  };
+  return `<div class="daystrip"><div class="daystriphead"><b>📅 ${T('Pick a date')}</b><button class="chip ${current === 'all' ? 'on' : ''}" ${attr}="all">${allLabel}</button></div><div class="stripscroll">${DAYS.map(cell).join('')}</div></div>`;
+}
+// When you are looking at a particular studio, the date picker sits right above the results
+function renderDayStrip() {
+  const box = $('#dayStrip'); if (!box) return;
+  if (!studioHitNames().length) { box.innerHTML = ''; return; }
+  const counts = {};
+  SESSIONS.filter(s => matches(s, true)).forEach(s => { counts[s.dateStr] = (counts[s.dateStr] || 0) + 1; });
+  box.innerHTML = dayStripHtml(counts, filters.day, 'data-day', T('All {n} days', { n: HORIZON }));
+}
+function renderStudioHits() {
+  const el = $('#studioHits');
+  const hits = studioHitNames();
   el.innerHTML = hits.length ? `<div class="hits">🏢 ${filters.studio !== 'all' ? T('Studio page:') : T('Studios:')} ${hits.slice(0, 5).map(n => `<a class="lnk" data-studio="${esc(n)}">${esc(n)} →</a>`).join('')}</div>` : '';
 }
 
@@ -584,7 +606,7 @@ function card(s, mode) {
 }
 
 function renderResults() {
-  renderStudioHits(); renderDayCal();
+  renderStudioHits(); renderDayCal(); renderDayStrip();
   const mapMode = exploreMode === 'map';
   $('#results').classList.toggle('hidden', mapMode);
   $('#mapWrap').classList.toggle('hidden', !mapMode);
@@ -739,7 +761,7 @@ function openDetails(classId) {
 const hash = t => [...t].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
 const starStr = n => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
 function showStudio(name, fromHash) {
-  currentStudio = name; renderStudio(); showTab('studio');
+  currentStudio = name; studioDay = 'all'; renderStudio(); showTab('studio');
   { const st = studioByName(name); if (st) track('view_studio', st.id); }
   document.title = `${name} | LittlePass`;
   const h = '#studio/' + encodeURIComponent(name);
@@ -818,6 +840,16 @@ function prefillReview() {
 }
 $('#view-studio').addEventListener('change', e => { if (e.target.id === 'rvClass') prefillReview(); });
 
+// The classes at one studio, grouped by day; studioDay narrows it to a single day
+function studioSchedHtml(list) {
+  let sched = '';
+  DAYS.forEach((d, i) => {
+    if (studioDay !== 'all' && String(studioDay) !== String(i)) return;
+    const items = list.filter(s => s.date.getTime() === d.getTime());
+    if (items.length) sched += `<h3 class="day-h">${dayName(d)}</h3><div class="grid">${items.map(s => card(s)).join('')}</div>`;
+  });
+  return sched || `<div class="empty">${studioDay === 'all' ? T('No classes scheduled') : T('No classes on this day. Try another date above.')}</div>`;
+}
 function renderStudio() {
   const st = studioByName(currentStudio), el = $('#view-studio');
   if (!st) { el.innerHTML = `<button class="back" data-back>${T('← Back')}</button><div class="empty">${T('Studio not found')}</div>`; return; }
@@ -832,11 +864,8 @@ function renderStudio() {
   if (rvClassFilter !== 'all' && !reviewedClasses.some(c => c.id === rvClassFilter)) rvClassFilter = 'all';
   const shown = rvClassFilter === 'all' ? all : real.filter(r => r.class_id === rvClassFilter);
   const list = SESSIONS.filter(s => s.studio === st.name).sort((a, b) => a.date - b.date || timeVal(a.time) - timeVal(b.time));
-  let sched = '';
-  DAYS.forEach(d => {
-    const items = list.filter(s => s.date.getTime() === d.getTime());
-    if (items.length) sched += `<h3 class="day-h">${dayName(d)}</h3><div class="grid">${items.map(s => card(s)).join('')}</div>`;
-  });
+  const sched = studioSchedHtml(list);
+  const dayCounts = {}; list.forEach(s => { dayCounts[s.dateStr] = (dayCounts[s.dateStr] || 0) + 1; });
   const c0 = CATS[cats[0]] || CATS.all;
   const photos = studioPhotos.filter(p => p.studio_id === st.id);
   const cat3 = [[T('Instructor'), avgOf(real, r => r.instructor_stars)], [T('Cleanliness'), avgOf(real, r => r.clean_stars)], [T('Value'), avgOf(real, r => r.value_stars)]].filter(x => x[1] != null);
@@ -848,6 +877,7 @@ function renderStudio() {
         <div class="meta">${all.length ? `<span class="stars">${starStr(avg)}</span> ${avg.toFixed(1)} (${T(all.length > 1 ? '{n} reviews' : '{n} review', { n: all.length })})` : T('New on LittlePass')}</div>
         <div class="meta">📍 ${hoods.length ? esc(hoods.join(' & ')) : 'San Diego'}</div></div>
     </div>
+    ${list.length ? `<div id="studioDays">${dayStripHtml(dayCounts, studioDay, 'data-sday', T('All {n} days', { n: HORIZON }))}</div>` : ''}
     <div class="panel"><div class="label">${T('About')}</div><p style="margin:0">${st.blurb ? esc(st.blurb) : T('A LittlePass partner studio.')}</p>
       <div class="tags">${cats.map(c => `<span class="tag">${CATS[c].emoji} ${T(CATS[c].label)}</span>`).join('')}</div></div>
     ${cs.length ? `<div class="panel"><div class="label">${T('Where')}</div>${[...new Map(cs.map(c => { const l = locByClass(c.id); return [l ? 'a:' + l.address : 'h:' + c.hood + (c.has_address ? '!' : ''), { c, l }]; })).values()].map(({ c, l }) =>
@@ -856,7 +886,7 @@ function renderStudio() {
     ${cs.length ? `<div class="panel"><div class="label">${T('Classes')}</div>${cs.map(c => `<div style="padding:8px 0;border-top:1px solid var(--line)"><b>${esc(c.title)}</b> <span class="meta">· ${ageText(c.age_min, c.age_max)} · ${T(LEVELS[c.level] || '').replace(/^\S+\s/, '')}</span>${c.description ? `<div class="meta">${esc(c.description.length > 110 ? c.description.slice(0, 110) + '…' : c.description)}</div>` : ''}<a class="lnk" style="font-size:13px" data-details="${c.id}">${T('Details')}</a></div>`).join('')}</div>` : ''}
     ${photos.length ? `<div class="label" style="margin-top:20px">${T('Photos')}</div><div class="photos real">${photos.map(p => `<img class="photo" loading="lazy" alt="${esc(p.caption || st.name)}" src="${photoUrl(p)}" data-photo="${p.id}">`).join('')}</div>`
       : sample && cats.length ? `<div class="label" style="margin-top:20px">${T('Photos')}</div><div class="photos">${cats.concat(cats, cats).slice(0, 3).map(c => `<div class="photo" style="background:${CATS[c].color}">${CATS[c].emoji}</div>`).join('')}</div><div class="meta" style="margin-top:4px">${T('Placeholder images for this demo partner.')}</div>` : ''}
-    <h2 style="margin:24px 0 0">${T('Schedule: next {n} days', { n: HORIZON })}</h2>${sched || `<div class="empty">${T('No classes scheduled')}</div>`}
+    <h2 style="margin:24px 0 0">${T('Schedule: next {n} days', { n: HORIZON })}</h2><div id="studioSched">${sched}</div>
     <h2 style="margin:28px 0 8px">${T('What parents are saying')}</h2>
     ${all.length ? `<div class="panel" style="margin-top:0"><div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
         <div style="text-align:center"><div style="font-size:38px;font-weight:800;line-height:1">${avg.toFixed(1)}</div><div class="stars">${starStr(avg)}</div><div class="meta">${T(all.length > 1 ? '{n} reviews' : '{n} review', { n: all.length })}</div></div>
@@ -1181,7 +1211,7 @@ function renderOwner() {
   const el = $('#view-owner');
   if (!user) {
     el.innerHTML = `<div class="hero" style="margin-top:20px"><h1>Fill your classes with San Diego families 🐣</h1>
-      <p>List your baby and toddler classes on LittlePass. Set your own prices and schedule, and get paid for every booking.</p></div>
+      <p>List your kids' classes on LittlePass (ages 0 to 12). Set your own prices and schedule, and get paid for every booking.</p></div>
       <div class="panel"><ul style="margin:0 0 14px;padding-left:18px;line-height:1.8"><li>Add classes with several time slots, spots and prices</li><li>See who booked, in real time</li><li>Track what you've earned and when you were paid</li></ul>
       <button class="btn" data-signup-studio>Sign up as a studio</button> <button class="btn ghost" data-login>Log in</button></div>`;
     return;
@@ -1204,7 +1234,7 @@ function renderOwner() {
 }
 
 function sessionRoster(st) {
-  // upcoming sessions (next 2 weeks) with who's booked
+  // upcoming sessions (next 30 days) with who's booked
   return SESSIONS.filter(s => s.studioId === st.id).sort((a, b) => a.date - b.date || timeVal(a.time) - timeVal(b.time));
 }
 const bar = (n, cap) => `<div class="fillbar"><div style="width:${cap ? Math.min(100, n / cap * 100) : 0}%"></div></div>`;
@@ -1224,7 +1254,7 @@ function ownerOverview(el, st) {
         <div><b>${esc(s.title)}</b><div class="meta">${dayName(s.date)} · ${s.time} · ${s.mins} min</div>
           <a class="lnk" style="font-size:13px" data-cancelsession="${s.key}|${s.dateStr}" data-n="${s.taken}">Cancel this session</a></div>
         <div style="text-align:right;min-width:90px"><b>${s.taken}/${s.capacity}</b> booked${bar(s.taken, s.capacity)}</div></div>`).join('')}</div>`
-      : `<div class="panel"><p class="meta" style="margin:0">No sessions in the next 2 weeks. Add a class and time slots to get started.</p></div>`}
+      : `<div class="panel"><p class="meta" style="margin:0">No sessions in the next 30 days. Add a class and time slots to get started.</p></div>`}
     ${(() => { const mine = CANCELLED.filter(c => c.studioId === st.id).sort((a, b) => a.date - b.date); return mine.length ? `<h3 style="margin:22px 0 8px">Cancelled sessions</h3><div class="panel" style="margin-top:0">${mine.map(c => `<div class="sess"><div><b>${esc(c.title)}</b><div class="meta">${dayName(c.date)} · ${c.time}${c.reason ? ' · ' + esc(c.reason) : ''}</div></div><button class="btn ghost" data-restoresession="${c.key}|${c.dateStr}">Reopen</button></div>`).join('')}</div>` : ''; })()}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
       <button class="btn" data-goto="o-classes">Manage classes</button>
@@ -1246,7 +1276,7 @@ const slotRow = sl => {
     <div><button class="btn ghost" data-rmslot="${sl.id}" title="Delete this time slot">✕</button></div>
     ${n ? `<div class="meta slotnote">${n} upcoming booking${n > 1 ? 's' : ''}</div>` : ''}</div>`;
 };
-const ages = Array.from({ length: 61 }, (_, m) => m).filter(m => m <= 12 || m % 6 === 0);
+const ages = Array.from({ length: 145 }, (_, m) => m).filter(m => m <= 12 || (m <= 60 && m % 6 === 0) || (m > 60 && m % 12 === 0));  // months: every month to 1 yr, every 6 months to 5 yrs, every year to 12 yrs
 const ageOpt = (m, sel) => `<option value="${m}" ${m === sel ? 'selected' : ''}>${m < 12 ? m + ' mo' : (m / 12) + (m === 12 ? ' yr' : ' yrs')}</option>`;
 const scheduleForm = () => `
   <div class="label">Days</div>
@@ -1284,7 +1314,7 @@ function ownerClasses(el, st) {
         <button class="btn ghost danger" data-rmclass="${c.id}" style="margin-top:12px">Delete class</button></div>`;
     }).join('') || '<div class="panel"><p class="meta" style="margin:0">No classes yet. Create your first one below.</p></div>'}
     <details class="panel" id="newClass" ${cs.length ? '' : 'open'}><summary style="font-weight:800;font-size:17px;cursor:pointer">＋ New class</summary>
-      <div style="margin-top:12px"><div class="label">Class name</div><input id="ncTitle" placeholder="e.g. Baby Music Circle">
+      <div style="margin-top:12px"><div class="label">Class name</div><input id="ncTitle" placeholder="e.g. Toddler Music Circle">
       <div class="two"><div><div class="label">Activity</div><select id="ncCat">${Object.entries(CATS).filter(([id]) => id !== 'all').map(([id, k]) => `<option value="${id}">${k.emoji} ${k.label}</option>`).join('')}</select></div>
       <div><div class="label">Neighborhood</div><select id="ncHood">${HOODS.slice(1).map(h => `<option>${h}</option>`).join('')}</select></div></div>
       <div class="two"><div><div class="label">From age</div><select id="ncMin">${ages.map(m => ageOpt(m, 6)).join('')}</select></div>
@@ -1705,7 +1735,7 @@ function renderAdminStats(el) {
       <div class="stat"><b>${money(N.mrr_cents)}</b>monthly revenue</div>
       <div class="stat"><b>${N.parents}</b>families signed up</div>
       <div class="stat"><b>${N.studios_live}</b>live studios${N.studios_pending ? `<div class="meta">${N.studios_pending} waiting</div>` : ''}</div>
-      <div class="stat"><b>${N.upcoming_bookings}</b>bookings, next 14 days<div class="meta">${pct(N.upcoming_bookings, N.seats_next_14)} of ${N.seats_next_14} spots</div></div>
+      <div class="stat"><b>${N.upcoming_bookings}</b>bookings, next 30 days<div class="meta">${pct(N.upcoming_bookings, N.seats_next_30 ?? N.seats_next_14)} of ${N.seats_next_30 ?? N.seats_next_14} spots</div></div>
       <div class="stat"><b>${N.waitlist}</b>on waitlists</div></div>
     <div class="panel"><div class="label">Money to keep an eye on</div>
       <div class="hist"><div>Unused credits families hold<div class="meta">What you'd pay studios if every credit got used</div></div><b>⭐ ${N.credits_outstanding} ≈ ${money(N.credits_outstanding_cost_cents)}</b></div>
@@ -2176,6 +2206,18 @@ async function handleClick(e) {
   if ((el = hit('[data-hidereview]'))) { setReviewHidden(el.dataset.hidereview, el.dataset.to === 'true'); return; }
   if ((el = hit('[data-adminrmphoto]'))) { adminRemovePhoto(el.dataset.adminrmphoto); return; }
   if ((el = hit('[data-dismiss]'))) { await sb.from('reports').update({ resolved: true }).eq('id', el.dataset.dismiss); await refresh(); toast('Dismissed'); return; }
+  if ((el = hit('[data-sday]'))) {
+    const v = el.dataset.sday;
+    studioDay = v === 'all' || String(studioDay) === v ? 'all' : v;
+    const st = studioByName(currentStudio); if (!st) return;
+    const list = SESSIONS.filter(s => s.studio === st.name).sort((a, b) => a.date - b.date || timeVal(a.time) - timeVal(b.time));
+    const counts = {}; list.forEach(s => { counts[s.dateStr] = (counts[s.dateStr] || 0) + 1; });
+    const keep = $('#studioDays .stripscroll') ? $('#studioDays .stripscroll').scrollLeft : 0;
+    $('#studioDays').innerHTML = dayStripHtml(counts, studioDay, 'data-sday', T('All {n} days', { n: HORIZON }));
+    $('#studioDays .stripscroll').scrollLeft = keep;
+    $('#studioSched').innerHTML = studioSchedHtml(list);
+    return;
+  }
   if ((el = hit('[data-day]'))) {
     const v = el.dataset.day;
     filters.day = v === 'all' || String(filters.day) === v ? 'all' : v;   // tapping the chosen day again clears it
@@ -2405,7 +2447,7 @@ function showTab(name) {
   currentView = view;
   VIEWS.forEach(t => $('#view-' + t).classList.toggle('hidden', t !== view));
   markNav();
-  if (view !== 'studio') document.title = T('LittlePass San Diego | Baby & toddler classes');
+  if (view !== 'studio') document.title = T("LittlePass San Diego | Kids' classes, ages 0 to 12");
   if (!['studio', 'owner', 'admin'].includes(view)) lastTab = view;
   else if (view === 'admin') lastTab = name;
   else if (view === 'owner') lastTab = name.startsWith('o-') ? name : 'owner';

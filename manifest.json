@@ -1,7 +1,7 @@
 {
   "name": "LittlePass San Diego",
   "short_name": "LittlePass",
-  "description": "Baby and toddler classes across San Diego, with one membership.",
+  "description": "Kids' classes (ages 0 to 12) across San Diego, with one membership.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#fffaf5",

@@ -22,7 +22,7 @@ TERMS = '''
 <p>These Terms are an agreement between you and <b>[BUSINESS NAME, LLC]</b> ("<b>LittlePass</b>", "we", "us"), a [STATE] company at [BUSINESS ADDRESS]. By creating an account or using LittlePass you agree to these Terms and our <a href="privacy.html">Privacy Policy</a>.</p>
 
 <h2>1. What LittlePass is</h2>
-<p>LittlePass is an online marketplace that helps parents and caregivers in San Diego find and book baby and toddler classes. <b>The classes are run by independent studios, not by LittlePass.</b> We list classes, handle bookings and payments, and pass studios their share. We don't teach, supervise or employ the instructors, and we don't control the studios' spaces.</p>
+<p>LittlePass is an online marketplace that helps parents and caregivers in San Diego find and book classes for children ages 0 to 12. <b>The classes are run by independent studios, not by LittlePass.</b> We list classes, handle bookings and payments, and pass studios their share. We don't teach, supervise or employ the instructors, and we don't control the studios' spaces.</p>
 
 <h2>2. Your account</h2>
 <ul>
@@ -109,7 +109,7 @@ PRIVACY = '''
 <h1>Privacy Policy</h1>
 <p class="meta">Last updated: [EFFECTIVE DATE] · Version: draft-1</p>
 
-<p><b>[BUSINESS NAME, LLC]</b> ("LittlePass", "we") runs LittlePass. This policy explains what information we collect, why, who we share it with, and the choices you have. Because LittlePass is used by families with babies and toddlers, we've tried to collect as little as we can.</p>
+<p><b>[BUSINESS NAME, LLC]</b> ("LittlePass", "we") runs LittlePass. This policy explains what information we collect, why, who we share it with, and the choices you have. Because LittlePass is used by families with young children (ages 0 to 12), we've tried to collect as little as we can.</p>
 
 <h2>1. Information we collect</h2>
 <table>

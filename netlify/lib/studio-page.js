@@ -93,7 +93,7 @@ ${jsonld ? `<script type="application/ld+json">${JSON.stringify(jsonld).replace(
 </style></head><body>
 <header><a class="logo" href="/">🐣 Little<span>Pass</span></a><a class="btn ghost" href="/" style="padding:8px 14px">Find classes</a></header>
 <main>${body}</main>
-<footer><p>LittlePass San Diego: one membership for baby and toddler classes at studios across San Diego. Plans start at $49 a month.</p>
+<footer><p>LittlePass San Diego: one membership for kids' classes (ages 0 to 12) at studios across San Diego. Plans start at $79 a month.</p>
 <p><a href="/studios">All studios</a> · <a href="/legal/terms.html">Terms</a> · <a href="/legal/privacy.html">Privacy</a></p></footer>
 </body></html>`;
 }
@@ -106,7 +106,7 @@ export function renderStudioPage(d, st, opts) {
   const photoUrl = p => `${d.sbUrl}/storage/v1/object/public/studio-photos/${p.path.split('/').map(encodeURIComponent).join('/')}`;
   const catNames = cats.map(c => CATS[c][0].toLowerCase());
   const where = hoods.length ? list(hoods) : 'San Diego';
-  const title = `${st.name}: baby & toddler classes in ${where} | LittlePass`;
+  const title = `${st.name}: kids' classes in ${where} | LittlePass`;
   const description = clip(st.blurb || `${catNames.length ? list(catNames) + ' classes' : 'Classes'} for ages ${ageText(minAge, maxAge)} in ${where}, San Diego. Book with a LittlePass membership.`, 160);
   const addr = d.locations.find(l => cs.some(c => c.id === l.class_id) && l.visibility === 'public');
   const jsonld = {
@@ -153,12 +153,12 @@ export function renderIndexPage(d, opts) {
   const card = x => `<a href="/studios/${slugify(x.st.name)}"><div class="card"><h3>${esc(x.st.name)}</h3>
     <div class="meta">${esc(list(x.hoods))} · ages ${ageText(x.minAge, x.maxAge)}${x.rv.length ? ` · ★ ${x.avg.toFixed(1)}` : ''}</div>
     <div class="tags">${x.cats.map(c => `<span class="tag">${CATS[c][1]} ${CATS[c][0]}</span>`).join('')}</div></div></a>`;
-  const body = `<div class="card"><h1>Baby &amp; toddler classes in San Diego</h1>
-      <p style="margin:6px 0 0">${rows.length} studios offering swim, music, gym, art, sensory play and more for ages 0 to 5. One LittlePass membership books them all.</p>
+  const body = `<div class="card"><h1>Kids' classes in San Diego, ages 0 to 12</h1>
+      <p style="margin:6px 0 0">${rows.length} studios offering swim, music, gym, dance, art and more for ages 0 to 12. One LittlePass membership books them all.</p>
       <p style="margin:16px 0 0"><a class="btn" href="/">Browse this week's classes</a></p></div>
     ${hoods.map(h => `<h2>${esc(h)}</h2><div class="grid">${rows.filter(x => x.hoods.includes(h)).map(card).join('')}</div>`).join('')}`;
-  return shell({ title: 'Baby & toddler class studios in San Diego | LittlePass',
-    description: 'Every studio on LittlePass San Diego: swim, music, gym, art and sensory classes for babies and toddlers, by neighborhood.',
+  return shell({ title: 'Kids' class studios in San Diego, ages 0 to 12 | LittlePass',
+    description: 'Every studio on LittlePass San Diego: swim, music, gym, dance and art classes for kids ages 0 to 12, by neighborhood.',
     canonical: `${opts.site}/studios`, image: `${opts.site}/og-image.png`, noindex: !opts.index, body, site: opts.site });
 }
 
