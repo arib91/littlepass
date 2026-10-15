@@ -65,9 +65,9 @@ const COORDS = {
   'Chula Vista': [32.6401, -117.0842], 'Del Mar': [32.9595, -117.2653],
 };
 const PLANS = [
-  { id: 'sprout', name: 'Sprout', price: 79,  credits: 24, perks: ['About 2 classes a month', 'Free cancellation up to 24h before', 'Unused credits roll over'] },
-  { id: 'bloom',  name: 'Bloom',  price: 149, credits: 48, perks: ['About 4 classes a month', 'Free cancellation up to 24h before', 'Unused credits roll over'], pop: true },
-  { id: 'grove',  name: 'Grove',  price: 289, credits: 96, perks: ['About 8 classes a month', 'Free cancellation up to 24h before', 'Unused credits roll over'] },
+  { id: 'sprout', name: 'Sprout', price: 79,  credits: 24, perks: ['About 2–4 activities a month', 'Free cancellation up to 24h before', 'Unused credits roll over'] },
+  { id: 'bloom',  name: 'Bloom',  price: 149, credits: 48, perks: ['About 4–8 activities a month', 'Free cancellation up to 24h before', 'Unused credits roll over'], pop: true },
+  { id: 'grove',  name: 'Grove',  price: 289, credits: 96, perks: ['About 8–16 activities a month', 'Free cancellation up to 24h before', 'Unused credits roll over'] },
 ];
 const REVIEW_POOL = [
   ['Maya R.', 5, 'My daughter looks forward to this every week. The teachers are so patient and kind.'],

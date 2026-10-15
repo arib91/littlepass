@@ -157,7 +157,7 @@ export function renderIndexPage(d, opts) {
       <p style="margin:6px 0 0">${rows.length} studios offering swim, music, gym, dance, art and more for ages 0 to 12. One LittlePass membership books them all.</p>
       <p style="margin:16px 0 0"><a class="btn" href="/">Browse this week's classes</a></p></div>
     ${hoods.map(h => `<h2>${esc(h)}</h2><div class="grid">${rows.filter(x => x.hoods.includes(h)).map(card).join('')}</div>`).join('')}`;
-  return shell({ title: 'Kids' class studios in San Diego, ages 0 to 12 | LittlePass',
+  return shell({ title: "Kids' class studios in San Diego, ages 0 to 12 | LittlePass",
     description: 'Every studio on LittlePass San Diego: swim, music, gym, dance and art classes for kids ages 0 to 12, by neighborhood.',
     canonical: `${opts.site}/studios`, image: `${opts.site}/og-image.png`, noindex: !opts.index, body, site: opts.site });
 }
