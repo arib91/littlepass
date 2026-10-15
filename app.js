@@ -87,7 +87,7 @@ const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // ---------- State ----------
 let user = null, profile = null, kids = [], myBookings = [], myWaitlist = [], studioBookings = [], payouts = [];
 let studios = [], classes = [], slots = [], counts = {}, reviews = [], loaded = false, cancelHours = 24;
-let filters = { age: 'all', cat: 'all', hood: HOODS[0], day: 'all', studio: 'all', cls: 'all', q: '' };
+let filters = { age: 'all', cat: 'all', hood: HOODS[0], day: 'all', studio: 'all', cls: 'all', stay: 'all', q: '' };
 let exploreMode = 'list', lastTab = 'explore', currentView = 'explore', currentStudio = null, studioDay = 'all';
 let authState = { mode: 'login', role: 'parent', reason: '' };
 let ownerTab = 'overview', bkFilter = 'upcoming', lastUid = undefined;
@@ -291,7 +291,7 @@ function buildSessions() {
       const dateStr = fmt(d), id = `${sl.id}_${dateStr}`, taken = counts[id] || 0;
       if (off.has(id)) { CANCELLED.push({ id, key: sl.id, studioId: st.id, title: c.title, date: d, dateStr, time: t12(sl.start_time), reason: off.get(id).reason }); return; }
       SESSIONS.push({ loc: locByClass(c.id), hasAddr: c.has_address, id, key: sl.id, classId: c.id, studioId: st.id, dateStr, title: c.title, studio: st.name, cat: c.cat, hood: c.hood,
-        ageMin: c.age_min, ageMax: c.age_max, credits: sl.credits, priceCents: sl.price_cents, date: d,
+        stays: c.parent_stays, ageMin: c.age_min, ageMax: c.age_max, credits: sl.credits, priceCents: sl.price_cents, date: d,
         time: t12(sl.start_time), time24: String(sl.start_time).slice(0, 8), mins: sl.mins, capacity: sl.capacity, taken, spots: sl.capacity - taken });
       any = true;
     });
@@ -476,6 +476,7 @@ function renderFilters() {
   $('#studioSel').innerHTML = `<option value="all">${T('All studios')}</option>` + studioNames.map(n => `<option value="${esc(n)}" ${filters.studio === n ? 'selected' : ''}>${esc(n)}</option>`).join('');
   $('#classSel').innerHTML = `<option value="all">${T('All classes')}</option>` + classTitles.map(n => `<option value="${esc(n)}" ${filters.cls === n ? 'selected' : ''}>${esc(n)}</option>`).join('');
   $('#hoodSel').innerHTML = HOODS.map(h => `<option value="${h}" ${filters.hood === h ? 'selected' : ''}>${h === HOODS[0] ? T(h) : h}</option>`).join('');
+  renderStayChips();
   updateFilterBadge();
   renderDayCal();
 }
@@ -497,6 +498,11 @@ $('#studioSel').onchange = e => { filters.studio = e.target.value; renderFilters
 $('#classSel').onchange = e => { filters.cls = e.target.value; updateFilterBadge(); renderResults(); };
 let searchTimer;
 $('#searchBox').oninput = e => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { filters.q = e.target.value; renderResults(); }, 120); };
+$('#stayChips').onclick = e => { const b = e.target.closest('[data-stay]'); if (!b) return; filters.stay = b.dataset.stay; renderStayChips(); setFilterPanel(null); renderResults(); };
+function renderStayChips() {
+  $('#stayChips').innerHTML = [['all', 'Either'], ['stays', 'Parent stays'], ['dropoff', 'Drop-off']].map(([id, l]) =>
+    `<button class="chip ${filters.stay === id ? 'on' : ''}" aria-pressed="${filters.stay === id}" data-stay="${id}">${id === 'stays' ? '👨‍👩‍👧 ' : id === 'dropoff' ? '🚪 ' : ''}${T(l)}</button>`).join('');
+}
 $('#hoodSel').onchange = e => { filters.hood = e.target.value; updateFilterBadge(); renderResults(); };
 
 function matches(s, ignoreDay) {
@@ -511,6 +517,7 @@ function matches(s, ignoreDay) {
   if (!ignoreDay && filters.day !== 'all' && s.date.getTime() !== DAYS[+filters.day].getTime()) return false;
   if (filters.studio !== 'all' && s.studio !== filters.studio) return false;
   if (filters.cls !== 'all' && s.title !== filters.cls) return false;
+  if (filters.stay !== 'all' && s.stays !== filters.stay && s.stays !== 'either') return false;   // 'either' classes fit both choices
   const terms = filters.q.toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length) {
     const hay = `${s.title} ${s.studio} ${s.hood} ${CATS[s.cat].label} ${T(CATS[s.cat].label)}`.toLowerCase();
@@ -520,14 +527,16 @@ function matches(s, ignoreDay) {
 }
 // Four filter buttons (studio, neighborhood, class, date). Each shows what is chosen and opens just its own picker.
 let openFilter = null;
+const STAY_LABEL = { stays: 'Parent stays', dropoff: 'Drop-off' };
 function updateFilterBadge() {
   const val = {
     studio: filters.studio !== 'all' ? filters.studio : '',
     hood: filters.hood !== HOODS[0] ? filters.hood : '',
     cls: filters.cls !== 'all' ? filters.cls : '',
+    stay: filters.stay !== 'all' ? T(STAY_LABEL[filters.stay]) : '',
     day: filters.day !== 'all' ? dateLabel(fmt(DAYS[+filters.day])) : '',
   };
-  const names = { studio: T('Studio'), hood: T('Neighborhood'), cls: T('Class'), day: T('Date') };
+  const names = { studio: T('Studio'), hood: T('Neighborhood'), cls: T('Class'), day: T('Date'), stay: T('Parent') };
   document.querySelectorAll('#filterBtns [data-fopen]').forEach(b => {
     const k = b.dataset.fopen, v = val[k];
     b.classList.toggle('on', !!v);
@@ -548,9 +557,9 @@ $('#showResults').onclick = () => {
   target.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 const filtersActive = () => filters.age !== 'all' || filters.cat !== 'all' || filters.hood !== HOODS[0] || filters.day !== 'all'
-  || filters.studio !== 'all' || filters.cls !== 'all' || !!filters.q.trim();
+  || filters.studio !== 'all' || filters.cls !== 'all' || filters.stay !== 'all' || !!filters.q.trim();
 function clearFilters() {
-  filters = { age: 'all', cat: 'all', hood: HOODS[0], day: 'all', studio: 'all', cls: 'all', q: '' };
+  filters = { age: 'all', cat: 'all', hood: HOODS[0], day: 'all', studio: 'all', cls: 'all', stay: 'all', q: '' };
   $('#searchBox').value = ''; renderFilters(); renderResults();
 }
 // Studios matching the search box or the studio dropdown

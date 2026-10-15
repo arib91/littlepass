@@ -368,6 +368,7 @@
       <button class="chip fbtn" data-fopen="hood" aria-expanded="false" aria-controls="filterPanel"></button>
       <button class="chip fbtn" data-fopen="cls" aria-expanded="false" aria-controls="filterPanel"></button>
       <button class="chip fbtn" data-fopen="day" aria-expanded="false" aria-controls="filterPanel"></button>
+      <button class="chip fbtn" data-fopen="stay" aria-expanded="false" aria-controls="filterPanel"></button>
     </div>
 
     <div class="filters hidden" id="filterPanel">
@@ -382,6 +383,10 @@
       <div data-fsec="hood" class="hidden">
         <div class="label" data-t>Neighborhood</div>
         <select id="hoodSel"></select>
+      </div>
+      <div data-fsec="stay" class="hidden">
+        <div class="label" data-t>Parent stays or drop-off</div>
+        <div class="chips" id="stayChips"></div>
       </div>
       <div data-fsec="day" class="hidden">
         <div class="label" data-t>Date</div>
