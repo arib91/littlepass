@@ -518,19 +518,32 @@ function matches(s, ignoreDay) {
   }
   return true;
 }
-// The Filters button shows how many of its own filters are on
+// Four filter buttons (studio, neighborhood, class, date). Each shows what is chosen and opens just its own picker.
+let openFilter = null;
 function updateFilterBadge() {
-  const n = [filters.hood !== HOODS[0], filters.day !== 'all', filters.studio !== 'all', filters.cls !== 'all'].filter(Boolean).length;  // age and activity chips are always visible, so they aren't counted here
-  $('#filtCount').textContent = n ? ` · ${n}` : '';
-  $('#filtersBtn').classList.toggle('on', n > 0);
+  const val = {
+    studio: filters.studio !== 'all' ? filters.studio : '',
+    hood: filters.hood !== HOODS[0] ? filters.hood : '',
+    cls: filters.cls !== 'all' ? filters.cls : '',
+    day: filters.day !== 'all' ? dateLabel(fmt(DAYS[+filters.day])) : '',
+  };
+  const names = { studio: T('Studio'), hood: T('Neighborhood'), cls: T('Class'), day: T('Date') };
+  document.querySelectorAll('#filterBtns [data-fopen]').forEach(b => {
+    const k = b.dataset.fopen, v = val[k];
+    b.classList.toggle('on', !!v);
+    b.setAttribute('aria-expanded', String(openFilter === k));
+    b.innerHTML = `${names[k]}${v ? `: <b>${esc(v.length > 16 ? v.slice(0, 15) + '…' : v)}</b>` : ''} ▾`;
+  });
 }
-function setFilterPanel(open) {
-  $('#filterPanel').classList.toggle('hidden', !open);
-  $('#filtersBtn').setAttribute('aria-expanded', String(open));
+function setFilterPanel(which) {
+  openFilter = which || null;
+  $('#filterPanel').classList.toggle('hidden', !openFilter);
+  document.querySelectorAll('#filterPanel [data-fsec]').forEach(s => s.classList.toggle('hidden', s.dataset.fsec !== openFilter));
+  updateFilterBadge();
 }
-$('#filtersBtn').onclick = () => setFilterPanel($('#filterPanel').classList.contains('hidden'));
+$('#filterBtns').onclick = e => { const b = e.target.closest('[data-fopen]'); if (b) setFilterPanel(openFilter === b.dataset.fopen ? null : b.dataset.fopen); };
 $('#showResults').onclick = () => {
-  setFilterPanel(false);
+  setFilterPanel(null);
   const target = exploreMode === 'map' ? $('#mapWrap') : $('#results');
   target.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
@@ -878,6 +891,7 @@ function renderStudio() {
         <div class="meta">📍 ${hoods.length ? esc(hoods.join(' & ')) : 'San Diego'}</div></div>
     </div>
     ${list.length ? `<div id="studioDays">${dayStripHtml(dayCounts, studioDay, 'data-sday', T('All {n} days', { n: HORIZON }))}</div>` : ''}
+    <div id="studioSchedWrap"><h2 style="margin:14px 0 0">${T('Schedule: next {n} days', { n: HORIZON })}</h2><div id="studioSched">${sched}</div></div>
     <div class="panel"><div class="label">${T('About')}</div><p style="margin:0">${st.blurb ? esc(st.blurb) : T('A LittlePass partner studio.')}</p>
       <div class="tags">${cats.map(c => `<span class="tag">${CATS[c].emoji} ${T(CATS[c].label)}</span>`).join('')}</div></div>
     ${cs.length ? `<div class="panel"><div class="label">${T('Where')}</div>${[...new Map(cs.map(c => { const l = locByClass(c.id); return [l ? 'a:' + l.address : 'h:' + c.hood + (c.has_address ? '!' : ''), { c, l }]; })).values()].map(({ c, l }) =>
@@ -886,7 +900,6 @@ function renderStudio() {
     ${cs.length ? `<div class="panel"><div class="label">${T('Classes')}</div>${cs.map(c => `<div style="padding:8px 0;border-top:1px solid var(--line)"><b>${esc(c.title)}</b> <span class="meta">· ${ageText(c.age_min, c.age_max)} · ${T(LEVELS[c.level] || '').replace(/^\S+\s/, '')}</span>${c.description ? `<div class="meta">${esc(c.description.length > 110 ? c.description.slice(0, 110) + '…' : c.description)}</div>` : ''}<a class="lnk" style="font-size:13px" data-details="${c.id}">${T('Details')}</a></div>`).join('')}</div>` : ''}
     ${photos.length ? `<div class="label" style="margin-top:20px">${T('Photos')}</div><div class="photos real">${photos.map(p => `<img class="photo" loading="lazy" alt="${esc(p.caption || st.name)}" src="${photoUrl(p)}" data-photo="${p.id}">`).join('')}</div>`
       : sample && cats.length ? `<div class="label" style="margin-top:20px">${T('Photos')}</div><div class="photos">${cats.concat(cats, cats).slice(0, 3).map(c => `<div class="photo" style="background:${CATS[c].color}">${CATS[c].emoji}</div>`).join('')}</div><div class="meta" style="margin-top:4px">${T('Placeholder images for this demo partner.')}</div>` : ''}
-    <h2 style="margin:24px 0 0">${T('Schedule: next {n} days', { n: HORIZON })}</h2><div id="studioSched">${sched}</div>
     <h2 style="margin:28px 0 8px">${T('What parents are saying')}</h2>
     ${all.length ? `<div class="panel" style="margin-top:0"><div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
         <div style="text-align:center"><div style="font-size:38px;font-weight:800;line-height:1">${avg.toFixed(1)}</div><div class="stars">${starStr(avg)}</div><div class="meta">${T(all.length > 1 ? '{n} reviews' : '{n} review', { n: all.length })}</div></div>
@@ -2221,7 +2234,7 @@ async function handleClick(e) {
   if ((el = hit('[data-day]'))) {
     const v = el.dataset.day;
     filters.day = v === 'all' || String(filters.day) === v ? 'all' : v;   // tapping the chosen day again clears it
-    updateFilterBadge(); renderResults(); return;
+    setFilterPanel(null); renderResults(); return;
   }
   if ((el = hit('[data-details]'))) { openDetails(el.dataset.details); return; }
   if (hit('[data-downloaddata]')) { downloadMyData(); return; }

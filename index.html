@@ -272,6 +272,7 @@
   .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0 6px; }
   .toolbar .seg { margin: 0; }
   .fbtn.on { border-color: var(--brand); color: var(--brand-dark); }
+  .fbtns { margin: 4px 0 2px; }
   #filterPanel { background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 14px; margin: 8px 0 14px; }
   .panelfoot { display: flex; gap: 8px; justify-content: flex-end; }
   @media (max-width: 430px) { .hero { padding: 16px; margin: 12px 0 0; border-radius: 20px; } .hero h1 { font-size: 21px; } .hero p { font-size: 14.5px; } }
@@ -361,25 +362,28 @@
     </div>
     <div class="toolbar">
       <div class="seg" id="seg"><button data-mode="list" class="on" data-t>☰ List</button><button data-mode="map" data-t>🗺️ Map</button></div>
-      <button class="chip fbtn" id="filtersBtn" aria-expanded="false" aria-controls="filterPanel"><span data-t>⚙️ Filters</span><span id="filtCount"></span></button>
+    </div>
+    <div class="chips fbtns" id="filterBtns" aria-label="Filter classes" data-taria>
+      <button class="chip fbtn" data-fopen="studio" aria-expanded="false" aria-controls="filterPanel"></button>
+      <button class="chip fbtn" data-fopen="hood" aria-expanded="false" aria-controls="filterPanel"></button>
+      <button class="chip fbtn" data-fopen="cls" aria-expanded="false" aria-controls="filterPanel"></button>
+      <button class="chip fbtn" data-fopen="day" aria-expanded="false" aria-controls="filterPanel"></button>
     </div>
 
     <div class="filters hidden" id="filterPanel">
-      <div class="row2">
-        <div>
-          <div class="label" data-t>Studio</div>
-          <select id="studioSel"></select>
-        </div>
-        <div>
-          <div class="label" data-t>Class</div>
-          <select id="classSel"></select>
-        </div>
+      <div data-fsec="studio" class="hidden">
+        <div class="label" data-t>Studio</div>
+        <select id="studioSel"></select>
       </div>
-      <div>
+      <div data-fsec="cls" class="hidden">
+        <div class="label" data-t>Class</div>
+        <select id="classSel"></select>
+      </div>
+      <div data-fsec="hood" class="hidden">
         <div class="label" data-t>Neighborhood</div>
         <select id="hoodSel"></select>
       </div>
-      <div>
+      <div data-fsec="day" class="hidden">
         <div class="label" data-t>Date</div>
         <div id="dayCal"></div>
       </div>
