@@ -528,6 +528,23 @@ function matches(s, ignoreDay) {
   }
   return true;
 }
+// A bar under the filter buttons that lists every filter that is on, each removable with one tap, plus a big Clear button.
+// It sticks to the top while you scroll the results.
+function renderActiveBar() {
+  const box = $('#activeBar'); if (!box) return;
+  if (!filtersActive()) { box.innerHTML = ''; return; }
+  const chips = [];
+  if (filters.q.trim()) chips.push(['q', '🔍 ' + filters.q.trim()]);
+  if (filters.age !== 'all') { const k = filters.age.startsWith('kid') ? kids[+filters.age.slice(3)] : null; chips.push(['age', '👶 ' + (k ? k.name : T((AGES.find(x => x.id === filters.age) || {}).label || ''))]); }
+  if (filters.cat !== 'all') chips.push(['cat', (CATS[filters.cat] || {}).emoji + ' ' + T((CATS[filters.cat] || {}).label || '')]);
+  if (filters.studio !== 'all') chips.push(['studio', filters.studio]);
+  if (filters.hood !== HOODS[0]) chips.push(['hood', '📍 ' + filters.hood]);
+  if (filters.cls !== 'all') chips.push(['cls', filters.cls]);
+  if (filters.day !== 'all') chips.push(['day', '📅 ' + dateLabel(fmt(DAYS[+filters.day]))]);
+  if (filters.stay !== 'all') chips.push(['stay', T(STAY_LABEL[filters.stay])]);
+  box.innerHTML = `<div class="activebar"><div class="achips">${chips.map(([k, l]) => `<button class="achip" data-rmf="${k}" aria-label="${T('Remove filter')}: ${esc(l)}">${esc(l)} ✕</button>`).join('')}</div>
+    <button class="btn clearbtn" data-clearfilters>${T('Clear all')}</button></div>`;
+}
 // Four filter buttons (studio, neighborhood, class, date). Each shows what is chosen and opens just its own picker.
 let openFilter = null;
 const STAY_LABEL = { stays: 'Parent stays', dropoff: 'Drop-off' };
@@ -632,7 +649,7 @@ function card(s, mode) {
 }
 
 function renderResults() {
-  renderStudioHits(); renderDayCal(); renderDayStrip();
+  renderStudioHits(); renderDayCal(); renderDayStrip(); renderActiveBar();
   const mapMode = exploreMode === 'map';
   $('#results').classList.toggle('hidden', mapMode);
   $('#mapWrap').classList.toggle('hidden', !mapMode);
@@ -2309,7 +2326,13 @@ async function handleClick(e) {
     if (sel) { sel.value = el.dataset.cid; prefillReview(); sel.closest('.panel').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
     return;
   }
-  if (hit('[data-clearfilters]')) { clearFilters(); return; }
+  if ((el = hit('[data-rmf]'))) {
+    const k = el.dataset.rmf;
+    if (k === 'q') { filters.q = ''; $('#searchBox').value = ''; } else if (k === 'age') filters.age = 'all'; else if (k === 'cat') filters.cat = 'all'; else if (k === 'studio') { filters.studio = 'all'; filters.cls = 'all'; }
+    else if (k === 'hood') filters.hood = HOODS[0]; else if (k === 'cls') filters.cls = 'all'; else if (k === 'day') filters.day = 'all'; else if (k === 'stay') filters.stay = 'all';
+    renderFilters(); renderResults(); return;
+  }
+  if (hit('[data-clearfilters]')) { setFilterPanel(null); clearFilters(); return; }
   if (hit('[data-goexplore]')) { showTab('explore'); return; }
   if (hit('[data-logout]')) { await sb.auth.signOut(); profile = null; renderNav(); showTab('explore'); toast(T('Logged out')); return; }
   if ((el = hit('[data-lang]'))) { setLang(el.dataset.lang); return; }
@@ -2530,6 +2553,7 @@ function showTab(name) {
   else if (name.startsWith('o-')) { ownerTab = name.slice(2); view = 'owner'; }
   else if (name === 'owner' && isStudioUser()) ownerTab = 'overview';
   currentView = view;
+  if (view !== 'explore') { try { setFilterPanel(null); } catch (e) {} }
   VIEWS.forEach(t => $('#view-' + t).classList.toggle('hidden', t !== view));
   markNav();
   if (view !== 'studio') document.title = T("LittlePass San Diego | Kids' classes, ages 0 to 12");
@@ -2543,7 +2567,13 @@ function showTab(name) {
   if (view === 'admin') renderAdmin();
   window.scrollTo(0, 0);
 }
-document.querySelector('nav.tabs').onclick = e => { const b = e.target.closest('[data-tab]'); if (b) showTab(b.dataset.tab); };
+document.querySelector('nav.tabs').onclick = e => {
+  const b = e.target.closest('[data-tab]'); if (!b) return;
+  if (b.dataset.tab === 'explore' && currentView === 'explore' && filtersActive()) clearFilters();   // tapping Explore again starts fresh
+  showTab(b.dataset.tab);
+};
+// Clicking anywhere outside the filter buttons and their picker closes the picker
+document.addEventListener('click', e => { if (openFilter && !e.target.closest('#filterPanel, #filterBtns, #modalBg')) setFilterPanel(null); });
 
 function renderAll() {
   renderHeader(); renderPicks(); renderFilters(); renderResults(); renderBookings(); renderPlans(); renderProfile();

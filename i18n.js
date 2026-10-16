@@ -16,6 +16,7 @@ const ES = {
   "Neighborhood": "Vecindario",
   "Date": "Fecha",
   "Clear all": "Borrar todo",
+  "Remove filter": "Quitar filtro",
   "Show results": "Ver resultados",
   "📍 Near me": "📍 Cerca de mí",
   "My classes": "Mis clases",

@@ -275,8 +275,13 @@
   .searchrow { margin: 14px 0 0; }
   .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0 6px; }
   .toolbar .seg { margin: 0; }
-  .fbtn.on { border-color: var(--brand); color: var(--brand-dark); }
+  .fbtn.on { background: #fff1ec; border-color: var(--brand); color: var(--brand-dark); }
   .fbtns { margin: 4px 0 2px; }
+  #activeBar { position: sticky; top: 57px; z-index: 6; }
+  .activebar { display: flex; align-items: center; gap: 8px; background: #fff; border: 2px solid var(--brand); border-radius: 14px; padding: 6px 6px 6px 8px; margin: 8px 0; box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+  .achips { display: flex; gap: 6px; overflow-x: auto; flex: 1; min-width: 0; -webkit-overflow-scrolling: touch; }
+  .achip { flex: none; border: 1.5px solid var(--line); background: #fbf7f1; border-radius: 999px; padding: 7px 11px; font: inherit; font-size: 13px; font-weight: 700; color: var(--ink); white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+  .clearbtn { flex: none; min-height: 44px; padding: 0 16px; font-weight: 800; }
   .kidrow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
   .kidrow input { margin: 0; min-width: 0; }
   #filterPanel { background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 14px; margin: 8px 0 14px; }
@@ -402,6 +407,7 @@
       <div class="panelfoot"><button class="btn ghost" data-clearfilters data-t>Clear all</button><button class="btn" id="showResults" data-t>Show results</button></div>
     </div>
 
+    <div id="activeBar"></div>
     <div id="dayStrip"></div>
     <div id="studioHits"></div>
     <div id="results"></div>
